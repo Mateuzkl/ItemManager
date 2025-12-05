@@ -47,6 +47,24 @@ it is not recommended for other versions.
 Put waifu2x-caffe release on ItemManager/waifu2x-caffe
 
 
+C:\ItemManager\
+   │  ItemManager.py
+   │  ItemManagerIco.ico
+   │  ItemManagerSplash.png
+   │
+   ├── Data\
+   │    datspr.py
+   │    ImageUpscale.py
+   │    otbparser.py
+   │    otbreload.py
+   │
+   └── Waifu2x-caffe\...
+
+
+<img width="651" height="157" alt="Screenshot_1" src="https://github.com/user-attachments/assets/ebc5c328-0520-4f92-b08c-3f8133d47e31" />
+
+
+
 #   ---------- Server-Side/Client-Side: ----------
 
 Tibia.dat/spr download:
