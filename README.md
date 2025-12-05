@@ -1,5 +1,7 @@
-#   ---------- ItemManager: ----------
-Editor for better editing of spr and dat images and files. 
+#   ---------- ItemManager ----------
+Editor spr and dat, upscale images and resizes.
+
+Warning: Project is still EXPERIMENTAL – expect bugs, freezes and occasional crashes.
 
 
 <img width="1919" height="1038" alt="Screenshot_2" src="https://github.com/user-attachments/assets/8f7b1efe-0498-4f8f-a239-d072d3f8b1f2" />
@@ -34,7 +36,7 @@ Manipulating the dat and spr files is only
 possible for versions 10.98; 
 it is not recommended for other versions.
 
-#   ---------- Required: ----------
+#   ---------- Required ----------
 
 - Python 3.10+
 - py -m pip install pillow
@@ -56,7 +58,7 @@ Put waifu2x-caffe release on ItemManager/waifu2x-caffe
 
 
 
-#   ---------- Server-Side/Client-Side: ----------
+#   ---------- Server-Side/Client-Side ----------
 
 Tibia.dat/spr download:
 https://downloads.ots.me/data/tibia-clients/dat_and_spr/1098.zip
