@@ -5,6 +5,7 @@ import struct
 import threading
 import os
 from PIL import Image, ImageTk
+import shutil
 
 METADATA_FLAGS = {
     0x00: ('Ground', '<H'), 0x01: ('GroundBorder', ''), 0x02: ('OnBottom', ''),
@@ -43,7 +44,6 @@ def rgb16_to_ob_index(val):
     gi = round(g / 51)
     bi = round(b / 51)
     return max(0, min(215, ri + gi * 6 + bi * 36))
-
 
 class DatEditor:
     def __init__(self, dat_path):
@@ -102,9 +102,7 @@ class DatEditor:
         texture_bytes = f.read(total_texture_block_size)
         return {"props": props, "texture_bytes": texture_bytes}
         
-        
-
-
+     
     def apply_changes(self, item_ids, attributes_to_set, attributes_to_unset):
         for item_id in item_ids:
             if item_id not in self.things['items']:
@@ -347,7 +345,16 @@ class DatSprTab(ctk.CTkFrame):
         self.tk_images_cache = {}
 
         self.build_ui()
+        
 
+        ctk.CTkLabel(
+            self,
+            text="Beta",
+            text_color="#ff5555",     
+            font=("Arial", 30, "bold") 
+        ).pack(side="top", pady=4)
+
+   
     def build_ui(self):
         self.ids_list_frame = ctk.CTkScrollableFrame(self, label_text="List", border_width=1, border_color="gray30")        
         self.ids_list_frame.pack(side="left", padx=10, pady=10, fill="y")
@@ -839,14 +846,13 @@ class DatSprTab(ctk.CTkFrame):
 
     def load_dat_file(self):
         filepath = filedialog.askopenfilename(
-            title="Selecione o arquivo Tibia.dat",
+            title="Selecione o arquivo .dat",
             filetypes=[("DAT files", "*.dat"), ("All files", "*.*")]
         )
         if not filepath:
             return
 
         try:
-
             self.editor = DatEditor(filepath)
             self.editor.load()
             self.current_page = 0
@@ -858,8 +864,9 @@ class DatSprTab(ctk.CTkFrame):
             )
             self.enable_editing()
 
-            import os
-            spr_path = os.path.join(os.path.dirname(filepath), "Tibia.spr")
+
+            base_path = os.path.splitext(filepath)[0]
+            spr_path = base_path + ".spr"
 
             if os.path.exists(spr_path):
                 if self.spr:
@@ -867,6 +874,7 @@ class DatSprTab(ctk.CTkFrame):
 
                 self.spr = SprReader(spr_path)
                 self.spr.load()
+
                 self.status_label.configure(
                     text=self.status_label.cget("text") +
                          f" | SPR carregado ({self.spr.sprite_count} sprites)",
@@ -922,8 +930,10 @@ class DatSprTab(ctk.CTkFrame):
 
     def load_ids_from_entry(self):
         if not self.editor: return
+        
         id_string = self.id_entry.get()
         self.current_ids = self.parse_ids(id_string)
+        
         if not self.current_ids:
             if id_string:
                 messagebox.showwarning("IDs Inválidos", "Formato incorreto. Use números, vírgulas e hifens (ex: 100, 105-110).")
@@ -932,10 +942,45 @@ class DatSprTab(ctk.CTkFrame):
                 cb.configure(text_color="white")
             self.clear_preview()
             return
+
         self.status_label.configure(text=f"Consultando {len(self.current_ids)} IDs...", text_color="cyan")
         self.update_checkboxes_for_ids()
         self.status_label.configure(text=f"{len(self.current_ids)} IDs carregados para edição.", text_color="white")
         self.prepare_preview_for_current_ids()
+
+        first_id = self.current_ids[0]
+        
+        if first_id >= 100:
+
+            target_page = (first_id - 100) // self.ids_per_page
+            
+            if self.current_page != target_page:
+                self.current_page = target_page
+                self.refresh_id_list()
+            else:
+                self.refresh_id_list()
+
+            for iid, button in self.id_buttons.items():
+                if iid in self.current_ids:
+                    button.configure(
+                        fg_color="#555555",        
+                        text_color="cyan"         
+                    )
+                else:
+                    button.configure(
+                        fg_color=("gray15", "gray25"),
+                        text_color="white"
+                    )
+
+            try:
+                index_in_page = (first_id - 100) % self.ids_per_page
+                scroll_pos = max(0, index_in_page / self.ids_per_page)
+                
+
+                self.ids_list_frame._parent_canvas.yview_moveto(scroll_pos)
+            except Exception:
+                pass
+
 
     def update_checkboxes_for_ids(self):
         if not self.current_ids: return
@@ -1126,15 +1171,45 @@ class DatSprTab(ctk.CTkFrame):
         if not self.editor:
             messagebox.showerror("Erro", "Nenhum arquivo .dat está carregado.")
             return
-        filepath = filedialog.asksaveasfilename(title="Salvar arquivo Tibia.dat como...", defaultextension=".dat", filetypes=[("DAT files", "*.dat"), ("All files", "*.*")])
-        if not filepath: return
+            
+        filepath = filedialog.asksaveasfilename(
+            title="Salvar arquivo DAT e SPR como...", 
+            defaultextension=".dat", 
+            filetypes=[("DAT files", "*.dat"), ("All files", "*.*")]
+        )
+        
+        if not filepath: 
+            return
+            
         try:
             self.editor.save(filepath)
-            self.status_label.configure(text=f"Arquivo salvo com sucesso em: {filepath}", text_color="lightgreen")
-            messagebox.showinfo("Sucesso", "O arquivo .dat modificado foi salvo com sucesso!")
+            
+            msg_extra = ""
+            
+
+            if self.spr and hasattr(self.spr, 'spr_path') and self.spr.spr_path:
+
+                base_path = os.path.splitext(filepath)[0]
+                spr_dest_path = base_path + ".spr"
+                
+
+                if os.path.abspath(self.spr.spr_path) != os.path.abspath(spr_dest_path):
+                    shutil.copy2(self.spr.spr_path, spr_dest_path)
+                    msg_extra = f"\nE o arquivo .spr foi copiado junto."
+                else:
+                    msg_extra = "\n(.spr mantido no local original)"
+            else:
+                msg_extra = "\nAviso: Nenhum .spr estava carregado para acompanhar."
+
+            self.status_label.configure(
+                text=f"Salvo com sucesso: {os.path.basename(filepath)} (+spr)", 
+                text_color="lightgreen"
+            )
+            messagebox.showinfo("Sucesso", f"O arquivo .dat foi compilado!{msg_extra}")
+            
         except Exception as e:
-            messagebox.showerror("Erro ao Salvar", f"Não foi possível salvar o arquivo:\n{e}")
-            self.status_label.configure(text="Falha ao salvar o arquivo.", text_color="red")
+            messagebox.showerror("Erro ao Salvar", f"Não foi possível salvar os arquivos:\n{e}")
+            self.status_label.configure(text="Falha ao salvar arquivos.", text_color="red")
 
 
     def prepare_preview_for_current_ids(self):
@@ -1198,7 +1273,7 @@ class DatSprTab(ctk.CTkFrame):
         tk_img = ImageTk.PhotoImage(img)
         self.tk_images_cache['preview'] = tk_img  
         self.canvas.delete("all")
-        self.canvas.create_image(2, 2, anchor=NW, image=tk_img)
+        self.canvas.create_image(2, 2, anchor="nw", image=tk_img)
         self.prev_index_label.configure(text=f"Sprite {idx+1} / {len(self.current_preview_sprite_list)} (ID {spr_id})")
         self.preview_info.configure(text=f"Sprite ID {spr_id} - {w}x{h} original, scale {scale:.2f}")
         ctk.set_appearance_mode("dark")
