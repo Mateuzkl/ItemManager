@@ -52,10 +52,10 @@ Put waifu2x-caffe release on ItemManager/waifu2x-caffe
 Tibia.dat/spr download:
 https://downloads.ots.me/data/tibia-clients/dat_and_spr/1098.zip
 
+- Client-side:
+
 Otclient Redemption:
 https://github.com/mehah/otclient/releases
-
-- Client-side:
 
 Otclient V8:
 https://github.com/OTCv8/otclientv8
