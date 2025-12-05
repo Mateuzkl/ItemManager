@@ -399,12 +399,17 @@ class ImageUpscaleApp(ctk.CTk):
         # Criar abas
         self.tab_manager = self.tab_view.add("Sprite Editor")
         self.tab_sprdat = self.tab_view.add("Spr/Dat Editor")
+        self.tab_otbreload = self.tab_view.add("Otb Reload")
 
         # Construir interface da aba Sprite Manager
         self.build_sprite_manager_ui(self.tab_manager)
         
          # Construir interface da aba Spr/Dat Editor
         self.build_dat_editor_ui(self.tab_sprdat)
+
+
+        # Aba Spr/Dat vazia por enquanto
+        ctk.CTkLabel(self.tab_otbreload, text="In Development...", font=("Arial", 20)).pack(pady=20)
 
 
     # ===========================================================
