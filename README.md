@@ -4,34 +4,35 @@ Editor spr and dat, upscale images and resizes.
 Warning: Project is still EXPERIMENTAL – expect bugs, freezes and occasional crashes.
 
 
-<img width="1919" height="1038" alt="Screenshot_2" src="https://github.com/user-attachments/assets/8f7b1efe-0498-4f8f-a239-d072d3f8b1f2" />
+<img width="1919" height="1040" alt="Screenshot_11" src="https://github.com/user-attachments/assets/f2f14cd6-196b-44ef-bef2-51e7f0d3095a" />
 
 
-<img width="1919" height="1037" alt="Screenshot_3" src="https://github.com/user-attachments/assets/95c430f5-badc-40a3-be68-cb948c9bbd90" />
+<img width="1919" height="1039" alt="Screenshot_10" src="https://github.com/user-attachments/assets/566dd54e-46e1-4204-859f-ad835cc3e5ef" />
 
 
-features:
+<img width="1919" height="1042" alt="Screenshot_12" src="https://github.com/user-attachments/assets/2a1dbad9-e7e6-4903-8e52-68f564acfa5f" />
+
+Features:
 
 -Image Enhancer
  - Upscale: 2, 4, 8
  - Denoise Level: 1, 2, 3 
  - Resize: 32x32, 64x64, 128x128, 512x512
  - Custom Size
-
-- Image Edit
-  - Mirror Vertical
-  - Mirror Horizontal
-  - Color Adjust
-  - Rotation
+ - Image Edit
+   - Mirror Vertical
+   - Mirror Horizontal
+   - Color Adjust
+   - Rotation
  
-- Spr/Dat Editor
+- Spr/Dat Editor (EXPERIMENTAL)
   - Edit Id
   - Flags Adjust
-  - Id Multi Edit
+  - Mass Edit/Delete
   
-- OTB Reload
-  - in Devolopment.
-
+- OTB Reload (EXPERIMENTAL)
+  - Flags Reload/Sync
+  
 Manipulating the dat and spr files is only 
 possible for versions 10.98; 
 it is not recommended for other versions.
