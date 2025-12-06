@@ -412,68 +412,56 @@ class SprReader:
             return None
                
 
-    def _decode_1098_rgba(self, data):
-        """
-        Decodificador para formato de sprite 32x32 do Tibia 10.x (Transparência):
-        - O formato interno dos pixels coloridos costuma ser BGRA ou RGBA dependendo da versão/compilação.
-        - Se a sprite estiver azulada, inverta R e B.
-        """
+    def _decode_standard(self, data):
         try:
             w, h = 32, 32
+            total_pixels = 1024
+            
             img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
             pixels = img.load()
-
+            
+            p = 0
             x = 0
             y = 0
-            p = 0
-            total_pixels = w * h
             drawn = 0
+            
+            if not data: return None
 
-            while p + 4 <= len(data) and drawn < total_pixels:
-
-                transparent, colored = struct.unpack_from('<HH', data, p)
+            while p < len(data) and drawn < total_pixels:
+                if p + 4 > len(data): break
+                
+                transparent = struct.unpack_from('<H', data, p)[0]
+                colored = struct.unpack_from('<H', data, p + 2)[0]
                 p += 4
-
+                
                 drawn += transparent
-                for _ in range(transparent):
-                    x += 1
-                    if x >= w:
-                        x = 0
-                        y += 1
-                        if y >= h:
-                            break
-                            
-                if p + colored * 4 > len(data):
-                    break
+                
+                current_pos = y * w + x + transparent
+                y = current_pos // w
+                x = current_pos % w
 
+                if p + colored * 3 > len(data): break
+                
                 for _ in range(colored):
-                    if y >= h:
-                        break
-
+                    if y >= h: break
+                    
                     r = data[p]
                     g = data[p+1]
                     b = data[p+2]
-                    a = data[p+3]
                     
-                    p += 4
 
-                    if a == 0:
-                        a = 255
-
-                    pixels[x, y] = (r, g, b, a)
-
+                    pixels[x, y] = (r, g, b, 255)
+                    
+                    p += 3
                     x += 1
                     drawn += 1
                     if x >= w:
                         x = 0
                         y += 1
-                        if y >= h:
-                            break
-
+            
             return img
-
         except Exception as e:
-            print("DEBUG: erro em _decode_1098_rgba:", e)
+            print(f"DEBUG: Erro no decodestandard: {e}")
             return None
 
 
@@ -543,8 +531,9 @@ class SprReader:
 
     def _decode_1098_rgba(self, data):
         """
-        Decodificador para formato de sprite 32x32 do Tibia 10.x:
-        - data: sequência RLE de (transparent:uint16, colored:uint16, colored*4 bytes BGRA)
+        Decodificador para formato de sprite 32x32 do Tibia 10.x (Transparência):
+        - O formato interno dos pixels coloridos costuma ser BGRA ou RGBA dependendo da versão/compilação.
+        - Se a sprite estiver azulada, inverta R e B.
         """
         try:
             w, h = 32, 32
@@ -562,7 +551,7 @@ class SprReader:
                 transparent, colored = struct.unpack_from('<HH', data, p)
                 p += 4
 
-  
+   
                 drawn += transparent
                 for _ in range(transparent):
                     x += 1
@@ -571,9 +560,10 @@ class SprReader:
                         y += 1
                         if y >= h:
                             break
-
+                            
                 if p + colored * 4 > len(data):
                     break
+
 
                 for _ in range(colored):
                     if y >= h:
@@ -583,11 +573,12 @@ class SprReader:
                     g = data[p+1]
                     b = data[p+2]
                     a = data[p+3]
+                    
+                
                     p += 4
 
- 
                     if a == 0:
-                        a = 255
+                        a = 255 
 
                     pixels[x, y] = (r, g, b, a)
 
@@ -627,8 +618,6 @@ class DatSprTab(ctk.CTkFrame):
         self.sprite_page = 0
         self.sprite_thumbs = {}
                 
-
-
         ctk.CTkLabel(
             self,
             text="Beta",
@@ -1060,7 +1049,6 @@ class DatSprTab(ctk.CTkFrame):
         if deleted_count > 0:
             status_message += f"{deleted_count} IDs at the end of the list were removed."
             
-
         self.status_label.configure(
             text=status_message,
             text_color="orange"
@@ -1074,7 +1062,6 @@ class DatSprTab(ctk.CTkFrame):
 
 
     def update_color_preview(self, attr_name):
-        """Atualiza o preview de cor quando o usuário digita."""
         entry = self.numeric_entries.get(attr_name)
         preview = self.numeric_previews.get(attr_name)
         
@@ -1203,11 +1190,9 @@ class DatSprTab(ctk.CTkFrame):
         self.visible_sprite_widgets = {} 
 
         if not self.spr: return
-
-
+        
         self.show_loading("Loading...\nPlease wait.")
 
-       
         total = self.spr.sprite_count
         start = self.sprite_page * self.sprites_per_page + 1
         end = min(start + self.sprites_per_page, total + 1)
@@ -1613,7 +1598,6 @@ class DatSprTab(ctk.CTkFrame):
     def update_checkboxes_for_ids(self, category="items"):
         if not self.current_ids: return
         
-
         things_dict = self.editor.things.get(category, {})
 
         for attr_name, cb in self.checkboxes.items():
@@ -1671,7 +1655,6 @@ class DatSprTab(ctk.CTkFrame):
             messagebox.showwarning("No Action", "Load a file and check some IDs first.")
             
             return
- 
 
         to_set, to_unset = [], []
         original_states = {}
@@ -1893,8 +1876,6 @@ class DatSprTab(ctk.CTkFrame):
         if 0 <= new_index < len(self.current_preview_sprite_list):
             self.current_preview_index = new_index
             self.show_preview_at_index(self.current_preview_index)
-
-
 
     def show_preview_at_index(self, idx):
         if not self.current_preview_sprite_list or not self.spr:
