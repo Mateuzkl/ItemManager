@@ -22,8 +22,25 @@ METADATA_FLAGS = {
     0x1E: ('LensHelp', '<H'), 0x1F: ('FullGround', ''), 0x20: ('IgnoreLook', ''),
     0x21: ('IsCloth', '<H'), 0x22: ('MarketItem', None), 0x23: ('DefaultAction', '<H'),
     0x24: ('Wrappable', ''), 0x25: ('Unwrappable', ''), 0x26: ('TopEffect', ''),
-    0x27: ('Usable', '')
+    0x27: ('Usable', ''), 0xFE: ('Usable_Extended', ''), 0xFD: ('Action_Extended', '<H'),
+    0x2B: ('LyingCorpse', ''), 0x2C: ('AnimatesAlways', ''),   
+    0x30: ('Cloth', '<H'),           
+    0x31: ('Market', '<HHHHSSH'),       # Estrutura complexa de Market
+    0x33: ('Wrapable', ''),             
+    0x34: ('Unwrapable', ''),
+    0x35: ('TopOrder', ''),
+    0x37: ('Wirable', ''),              
+    0x3A: ('Chargeable', ''),           
+    0x3C: ('NoDivination', ''),         
+    0x3E: ('ReverseDesc', ''),          
+    0x3F: ('NoDrop', ''),               
+    0x40: ('NoTrade', ''),              
+    
+ 
 }
+
+
+
 REVERSE_METADATA_FLAGS = {info[0]: flag for flag, info in METADATA_FLAGS.items()}
 LAST_FLAG = 0xFF
 
@@ -42,13 +59,22 @@ def rgb16_to_ob_index(val):
     gi = round(g / 51)
     bi = round(b / 51)
     return max(0, min(215, ri + gi * 6 + bi * 36))
-
+    
+    
 class DatEditor:
     def __init__(self, dat_path):
         self.dat_path = dat_path
         self.signature = 0
+
         self.counts = {'items': 0, 'outfits': 0, 'effects': 0, 'missiles': 0}
-        self.things = {'items': {}, 'outfits_effects_missiles_raw': b''}
+        self.things = {
+            'items': {}, 
+            'outfits': {}, 
+            'effects': {}, 
+            'missiles': {}
+        }
+
+
 
     def load(self):
         with open(self.dat_path, 'rb') as f:
@@ -99,7 +125,9 @@ class DatEditor:
         total_texture_block_size = texture_header_size + anim_detail_size + texture_data_size
         texture_bytes = f.read(total_texture_block_size)
         return {"props": props, "texture_bytes": texture_bytes}
-        
+
+
+
      
     def apply_changes(self, item_ids, attributes_to_set, attributes_to_unset):
         for item_id in item_ids:
@@ -127,11 +155,35 @@ class DatEditor:
         with open(output_path, 'wb') as f:
             f.write(struct.pack('<I', self.signature))
             f.write(struct.pack('<HHHH', self.counts['items'], self.counts['outfits'], self.counts['effects'], self.counts['missiles']))
+            
+            #  Items
             for item_id in range(100, self.counts['items'] + 1):
-                item = self.things['items'][item_id]
-                self._write_thing_properties(f, item['props'])
-                f.write(item['texture_bytes'])
-            f.write(self.things['outfits_effects_missiles_raw'])
+                item = self.things['items'].get(item_id)
+                if item:
+                    self._write_thing_properties(f, item['props'])
+                    f.write(item['texture_bytes'])
+            
+            #  Outfits
+            for outfit_id in range(1, self.counts['outfits'] + 1):
+                item = self.things['outfits'].get(outfit_id)
+                if item:
+                    self._write_thing_properties(f, item['props'])
+                    f.write(item['texture_bytes'])
+
+            #  Effects
+            for effect_id in range(1, self.counts['effects'] + 1):
+                item = self.things['effects'].get(effect_id)
+                if item:
+                    self._write_thing_properties(f, item['props'])
+                    f.write(item['texture_bytes'])
+
+            #  Missiles
+            for missile_id in range(1, self.counts['missiles'] + 1):
+                item = self.things['missiles'].get(missile_id)
+                if item:
+                    self._write_thing_properties(f, item['props'])
+                    f.write(item['texture_bytes'])
+            
 
     def _write_thing_properties(self, f, props):
         for flag, (name, fmt) in METADATA_FLAGS.items():
@@ -213,7 +265,7 @@ class SprReader:
         if not self._f or sprite_id <= 0 or sprite_id > self.sprite_count:
             return None
             
-        print("getsprite called with", sprite_id, "spritecount", self.sprite_count)         
+        #print("getsprite called with", sprite_id, "spritecount", self.sprite_count)         
        
         offset = self.offsets[sprite_id - 1]
         if offset == 0: return None
@@ -491,8 +543,8 @@ class DatSprTab(ctk.CTkFrame):
         self.selected_sprite_id = None             
         self.visible_sprite_widgets = {}        
   
-        self.editor = None  # Instância de DatEditor
-        self.spr = None     # Instância de SprReader
+        self.editor = None  #  DatEditor
+        self.spr = None     #  SprReader
         self.current_ids = []
         self.checkboxes = {}
         self.tk_images_cache = {}
@@ -504,7 +556,7 @@ class DatSprTab(ctk.CTkFrame):
         self.sprite_page = 0
         self.sprite_thumbs = {}
                 
-        self.build_loading_overlay()  
+
 
         ctk.CTkLabel(
             self,
@@ -513,20 +565,37 @@ class DatSprTab(ctk.CTkFrame):
             font=("Arial", 30, "bold") 
         ).pack(side="top", pady=4)
         
+        self.build_loading_overlay()
+        
        
     def build_ui(self):
+        
+        self.category_var = ctk.StringVar(value="Item")
+        self.category_combo = ctk.CTkComboBox(
+            self,
+            values=["Item", "Outfit", "Effect", "Missile"],
+            command=self.on_category_change,            
+            border_width=1,
+            border_color="gray30")
+            
+        self.category_combo.pack(
+            side="top",
+            anchor="w",   
+            padx= 10,
+            pady= 1 )
+        
+        
         self.ids_list_frame = ctk.CTkScrollableFrame(self, label_text="List ID", border_width=1, border_color="gray30")        
-        self.ids_list_frame.pack(side="left", padx=10, pady=10, fill="y")
+        self.ids_list_frame.pack(side="left", padx=10, pady=2, fill="y")
         
         self.sprite_list_frame = ctk.CTkScrollableFrame(self, label_text="List Sprites", border_width=1, border_color="gray30")        
-        self.sprite_list_frame.pack(side="right", padx=10, pady=10, fill="y")       
+        self.sprite_list_frame.pack(side="right", padx=10, pady=2, fill="y")       
         
         self.selected_sprite_id = None 
         self.id_buttons = {}
         self.ids_per_page = 250
         self.current_page = 0
 
-        # Top Frame
         self.top_frame = ctk.CTkFrame(self)
         self.top_frame.pack(padx=10, pady=10, fill="x")
         
@@ -534,11 +603,10 @@ class DatSprTab(ctk.CTkFrame):
         self.bottom_frame = ctk.CTkFrame(self, border_width=1, border_color="gray30")
         self.bottom_frame.pack(padx=10, pady=10, fill="x")
 
-        # Frame para operações de ID (Inserir/Apagar)
         id_operations_frame = ctk.CTkFrame(self.bottom_frame)
-        id_operations_frame.pack(side="left", padx=10, pady=10)
+        id_operations_frame.pack(side="left", padx=10, pady=1)
 
-        ctk.CTkLabel(id_operations_frame, text="Manage IDs:").pack(side="left", padx=(0, 5))
+        ctk.CTkLabel(id_operations_frame, text="Manage IDs:").pack(side="left", padx=(0, 5), pady=1)
 
         self.id_operation_entry = ctk.CTkEntry(
             id_operations_frame,
@@ -581,10 +649,10 @@ class DatSprTab(ctk.CTkFrame):
             text_color="gray"
         )
         self.file_label.pack(side="left", padx=10, expand=True, fill="x")
-
-        # ID Frame
+        
+     
         self.id_frame = ctk.CTkFrame(self, border_width=1, border_color="gray30")        
-        self.id_frame.pack(padx=10, pady=(0,10), fill="x")
+        self.id_frame.pack(padx=10, pady=(0,1), fill="x")
         
         ctk.CTkLabel(self.id_frame, text="ID: (Ex: 100, 105-110):").pack(side="left", padx=5)
         
@@ -593,7 +661,7 @@ class DatSprTab(ctk.CTkFrame):
             placeholder_text="Enter the item IDs here"
 
         )    
-        self.id_entry.pack(side="left", padx=10,pady=10, expand=True, fill="x")
+        self.id_entry.pack(side="left", padx=10,pady=1, expand=True, fill="x")
         self.id_entry.bind("<Return>", lambda event: self.load_ids_from_entry())
         
         self.load_ids_button = ctk.CTkButton(
@@ -604,13 +672,30 @@ class DatSprTab(ctk.CTkFrame):
         )
         self.load_ids_button.pack(side="left", padx=5)
 
-        self.attributes_frame = ctk.CTkScrollableFrame(self, label_text="Flags", border_width=1, border_color="gray30")
-        self.attributes_frame.pack(padx=10, pady=10, fill="both", expand=True)
-        
+
+        self.main_layout = ctk.CTkFrame(self)
+        self.main_layout.pack(padx=10, pady=10, fill="both", expand=True)
+
+
+        self.main_layout.grid_columnconfigure(0, minsize=300, weight=0)
+        self.main_layout.grid_columnconfigure(1, minsize=500, weight=1)
+
+        self.main_layout.grid_rowconfigure(0, weight=1)
+        self.main_layout.grid_rowconfigure(1, weight=0)
+
+
+        self.attributes_frame = ctk.CTkScrollableFrame(
+            self.main_layout,
+            label_text="Flags",
+            border_width=1,
+            border_color="gray30"
+        )
+        self.attributes_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+
         attr_names = sorted(REVERSE_METADATA_FLAGS.keys())
         num_attrs = len(attr_names)
         items_per_col = (num_attrs + 2) // 3
-        
+
         for i, attr_name in enumerate(attr_names):
             row = i % items_per_col
             col = i // items_per_col
@@ -618,8 +703,20 @@ class DatSprTab(ctk.CTkFrame):
             cb.grid(row=row, column=col, padx=10, pady=5, sticky="w")
             self.checkboxes[attr_name] = cb
 
-        self.numeric_attrs_frame = ctk.CTkFrame(self, border_width=1, border_color="gray30")
-        self.numeric_attrs_frame.pack(padx=10, pady=5, fill="x")
+        self.direction_frame = ctk.CTkScrollableFrame(
+            self.main_layout,
+            label_text="Direction",
+            border_width=1,
+            border_color="gray30"
+        )
+        self.direction_frame.grid(row=0, column=1, rowspan=2,  padx=10, pady=10, sticky="nsew")
+
+        self.numeric_attrs_frame = ctk.CTkFrame(
+            self.main_layout,
+            border_width=1,
+            border_color="gray30"
+        )
+        self.numeric_attrs_frame.grid(row=1, column=0, padx=10, pady=(0,10), sticky="nsew")
 
         self.numeric_entries = {}
         self.numeric_previews = {}
@@ -738,6 +835,12 @@ class DatSprTab(ctk.CTkFrame):
       
         self.status_label.pack(side="left", padx=10, pady=10, expand=True, fill="x") 
         self.disable_editing()
+        
+        
+    def on_category_change(self, choice):
+        self.current_page = 0
+        self.id_entry.delete(0, "end") 
+        self.refresh_id_list()
         
 
     def insert_ids(self):
@@ -945,49 +1048,46 @@ class DatSprTab(ctk.CTkFrame):
 
         self.id_buttons.clear()
         
+        if not self.editor:
+            return 
+
         self.show_loading("Loading...\nPlease wait.")            
 
-                
-        total = self.editor.counts['items']
-        start = self.current_page * self.ids_per_page + 100
-        end = min(start + self.ids_per_page, total + 1)
+        cat_map = {"Item": "items", "Outfit": "outfits", "Effect": "effects", "Missile": "missiles"}
+        current_cat_key = cat_map.get(self.category_var.get(), "items")
+        
+        start_id_offset = 100 if current_cat_key == "items" else 1
+        
+        total_count = self.editor.counts[current_cat_key]
+        
+        start_index = self.current_page * self.ids_per_page
+        current_start_id = start_index + start_id_offset
 
-        for item_id in range(start, end):
+        max_id = start_id_offset + total_count
+        end_id = min(current_start_id + self.ids_per_page, max_id)
 
-            item_frame = ctk.CTkFrame(
-                self.ids_list_frame,
-                fg_color="transparent"
-            )
+        for item_id in range(current_start_id, end_id):
+
+            item_frame = ctk.CTkFrame(self.ids_list_frame, fg_color="transparent")
             item_frame.pack(pady=1, fill="x")
             
-            sprite_label = ctk.CTkLabel(
-                item_frame,
-                text="",
-                width=80,
-                height=80,
-                fg_color="#222121"
-            )
+            sprite_label = ctk.CTkLabel(item_frame, text="", width=80, height=80, fg_color="#222121")
             sprite_label.pack(side="left", padx=(2, 5))
             
-            if self.spr and item_id in self.editor.things['items']:
-                item = self.editor.things['items'][item_id]
+            if self.spr and item_id in self.editor.things[current_cat_key]:
+                item = self.editor.things[current_cat_key][item_id]
                 sprite_ids = DatEditor.extract_sprite_ids_from_texture_bytes(item['texture_bytes'])
                 
                 if sprite_ids and sprite_ids[0] > 0:
                     try:
                         img = self.spr.get_sprite(sprite_ids[0])
                         if img:
- 
                             img_resized = img.resize((32, 32), Image.NEAREST)
-                            tk_img = ctk.CTkImage(
-                                light_image=img_resized,
-                                dark_image=img_resized,
-                                size=(72, 72)
-                            )
+                            tk_img = ctk.CTkImage(light_image=img_resized, dark_image=img_resized, size=(72, 72))
                             sprite_label.configure(image=tk_img, text="")
                             sprite_label.image = tk_img 
                     except Exception as e:
-                        print(f"Erro ao carregar sprite para ID {item_id}: {e}")
+                        print(f"Erro sprite {item_id}: {e}")
             
             id_label = ctk.CTkLabel(
                 item_frame,
@@ -1008,24 +1108,13 @@ class DatSprTab(ctk.CTkFrame):
         nav_frame.pack(pady=10)
 
         if self.current_page > 0:
-            prev_btn = ctk.CTkButton(
-                nav_frame,
-                text="⟵",
-                width=60,
-                command=self.prev_page
-            )
-            prev_btn.pack(side="left", padx=5)
+            ctk.CTkButton(nav_frame, text="⟵", width=60, command=self.prev_page).pack(side="left", padx=5)
 
-        if end <= total:
-            next_btn = ctk.CTkButton(
-                nav_frame,
-                text="⟶",
-                width=60,
-                command=self.next_page
-            )
-            next_btn.pack(side="left", padx=5)
+        if end_id < max_id:
+            ctk.CTkButton(nav_frame, text="⟶", width=60, command=self.next_page).pack(side="left", padx=5)
             
-        self.hide_loading()            
+        self.hide_loading()
+
             
     def refresh_sprite_list(self):
         for w in self.sprite_list_frame.winfo_children():
@@ -1037,12 +1126,9 @@ class DatSprTab(ctk.CTkFrame):
         if not self.spr: return
 
 
-  
         self.show_loading("Loading...\nPlease wait.")
 
-         
-
-
+       
         total = self.spr.sprite_count
         start = self.sprite_page * self.sprites_per_page + 1
         end = min(start + self.sprites_per_page, total + 1)
@@ -1053,7 +1139,6 @@ class DatSprTab(ctk.CTkFrame):
 
             is_current = (spr_id == self.selected_sprite_id)
             
-            # Define cores iniciais
             bg_color = "#555555" if is_current else "transparent"
             txt_color = "cyan" if is_current else "white"
 
@@ -1103,8 +1188,6 @@ class DatSprTab(ctk.CTkFrame):
                 command=self.next_sprite_page
             ).pack(side="left", padx=5)
     
-
-            # Esconde o Loading
             self.hide_loading()
 
     
@@ -1241,29 +1324,26 @@ class DatSprTab(ctk.CTkFrame):
 
 
     def load_single_id(self, item_id):
-        if not self.editor:
-            return
+        if not self.editor: return
+
+        cat_map = {"Item": "items", "Outfit": "outfits", "Effect": "effects", "Missile": "missiles"}
+        current_cat_key = cat_map.get(self.category_var.get(), "items")
 
         self.current_ids = [item_id]
         self.id_entry.delete(0, "end")
         self.id_entry.insert(0, str(item_id))
 
-        self.update_checkboxes_for_ids()
-        self.prepare_preview_for_current_ids()
+        self.update_checkboxes_for_ids(current_cat_key) 
+        self.prepare_preview_for_current_ids(current_cat_key)
 
         for iid, button in self.id_buttons.items():
             if iid == item_id:
-                button.configure(
-                    fg_color="#555555",        
-                    text_color="cyan"          
-                )
+                button.configure(fg_color="#555555", text_color="cyan")
             else:
-                button.configure(
-                    fg_color=("gray15", "gray25"),
-                    text_color="white"
-                )
+                button.configure(fg_color=("gray15", "gray25"), text_color="white")
 
-        self.status_label.configure(text=f"ID {item_id} loaded.", text_color="cyan")
+        self.status_label.configure(text=f"ID {item_id} ({current_cat_key}) loaded.", text_color="cyan")
+
 
 
     def disable_editing(self):
@@ -1302,24 +1382,17 @@ class DatSprTab(ctk.CTkFrame):
         if not filepath:
             return
 
-        # Mostra o Loading
         self.show_loading("Loading...\nPlease wait.")
 
         try:
-            # Carrega o .dat
+
             self.editor = DatEditor(filepath)
             self.editor.load()
             self.current_page = 0
-            self.refresh_id_list()
-            
-            self.file_label.configure(text=filepath, text_color="white")
-            self.status_label.configure(
-                text=f".dat file loaded! Items: {self.editor.counts['items']}",
-                text_color="green"
-            )
+
+         
             self.enable_editing()
 
-            # Lógica do SPR automático
             base_path = os.path.splitext(filepath)[0]
             spr_path = base_path + ".spr"
 
@@ -1333,14 +1406,27 @@ class DatSprTab(ctk.CTkFrame):
                 self.spr.load()
 
                 self.status_label.configure(
-                    text=f".dat and .spr loaded! Sprites: {self.spr.sprite_count}",
-                    text_color="green"
+                    text=(
+                        f"Files loaded! "
+                        f"Items: {self.editor.counts['items']}  /  "
+                        f"Outfits: {self.editor.counts['outfits']}  /  "
+                        f"Effects: {self.editor.counts['effects']}  /  "
+                        f"Missiles: {self.editor.counts['missiles']}  /  "
+                        f"Sprite Total: {self.spr.sprite_count}"
+                    ),
+                    text_color="cyan"
                 )
+
+            
                 self.preview_info.configure(
                     text=f"SPR loaded: {spr_path}\nSprites: {self.spr.sprite_count}"
                 )
                 self.sprite_page = 0
+
+                # update sprite list
                 self.refresh_sprite_list()
+            # update list id's              
+            self.refresh_id_list()                
 
         except Exception as e:
             print(e)
@@ -1348,8 +1434,8 @@ class DatSprTab(ctk.CTkFrame):
             self.status_label.configure(text="Failed to load the file.", text_color="red")
 
         finally:
-            # Esconde o Loading
-            
+
+           
             self.hide_loading()
          
                 
@@ -1362,8 +1448,8 @@ class DatSprTab(ctk.CTkFrame):
                 self.spr.close()
             self.spr = SprReader(filepath)
             self.spr.load()
-            self.status_label.configure(text=f"SPR loaded! Sprites: {self.spr.sprite_count}", text_color="green")
-            self.preview_info.configure(text=f"SPR loaded: {filepath}\nSprites: {self.spr.sprite_count}")
+            #self.status_label.configure(text=f"SPR loaded! Sprites: {self.spr.sprite_count}", text_color="green")
+            #self.preview_info.configure(text=f"SPR loaded: {filepath}\nSprites: {self.spr.sprite_count}")
         except Exception as e:
             messagebox.showerror("Load SPR Error", f"Could not load/open the SPR:\n{e}")
             self.status_label.configure(text="Failed to load SPR.", text_color="red")
@@ -1442,12 +1528,17 @@ class DatSprTab(ctk.CTkFrame):
                 pass
 
 
-    def update_checkboxes_for_ids(self):
+    def update_checkboxes_for_ids(self, category="items"):
         if not self.current_ids: return
         
+        # Usa a categoria passada, não 'items' fixo
+        things_dict = self.editor.things.get(category, {})
+
         for attr_name, cb in self.checkboxes.items():
-            states = [attr_name in self.editor.things['items'][item_id]['props'] 
-                     for item_id in self.current_ids if item_id in self.editor.things['items']]
+            # Verifica no dicionário correto
+            states = [attr_name in things_dict[item_id]['props'] 
+                     for item_id in self.current_ids if item_id in things_dict]
+            
             if not states:
                 cb.deselect(); cb.configure(text_color="gray")
             elif all(states):
@@ -1457,28 +1548,30 @@ class DatSprTab(ctk.CTkFrame):
             else:
                 cb.deselect(); cb.configure(text_color="cyan")
         
-        self.load_numeric_attribute("ShowOnMinimap", "ShowOnMinimap_data", 0)
-        self.load_numeric_attribute("HasElevation", "HasElevation_data", 0)
-        self.load_numeric_attribute("Ground", "Ground_data", 0)
-        self.load_numeric_attribute("HasOffset_X", "HasOffset_data", 0)
-        self.load_numeric_attribute("HasOffset_Y", "HasOffset_data", 1)
-        self.load_numeric_attribute("HasLight_Level", "HasLight_data", 0)
-        self.load_numeric_attribute("HasLight_Color", "HasLight_data", 1)
+        # Para atributos numéricos, também precisamos passar a categoria (veja abaixo)
+        self.load_numeric_attribute("ShowOnMinimap", "ShowOnMinimap_data", 0, category)
+        self.load_numeric_attribute("HasElevation", "HasElevation_data", 0, category)
+        self.load_numeric_attribute("Ground", "Ground_data", 0, category)
+        self.load_numeric_attribute("HasOffset_X", "HasOffset_data", 0, category)
+        self.load_numeric_attribute("HasOffset_Y", "HasOffset_data", 1, category)
+        self.load_numeric_attribute("HasLight_Level", "HasLight_data", 0, category)
+        self.load_numeric_attribute("HasLight_Color", "HasLight_data", 1, category)
 
-    def load_numeric_attribute(self, entry_key, data_key, index):
-        """Carrega valor de atributo numérico para o entry correspondente."""
+    def load_numeric_attribute(self, entry_key, data_key, index, category="items"):
         entry = self.numeric_entries.get(entry_key)
-        if not entry:
-            return
+        if not entry: return
             
         values = []
+        things_dict = self.editor.things.get(category, {}) # Usa a categoria correta
+
         for item_id in self.current_ids:
-            item = self.editor.things['items'].get(item_id)
+            item = things_dict.get(item_id)
             if item and data_key in item['props']:
                 data = item['props'][data_key]
                 if isinstance(data, tuple) and len(data) > index:
                     values.append(data[index])
         
+        # ... (resto da função permanece igual) ...
         if not values:
             entry.delete(0, "end")
             if entry_key in self.numeric_previews:
@@ -1673,29 +1766,30 @@ class DatSprTab(ctk.CTkFrame):
             self.status_label.configure(text="Failed to save files.", text_color="red")
 
 
-    def prepare_preview_for_current_ids(self):
-
+    def prepare_preview_for_current_ids(self, category="items"):
         self.current_preview_sprite_list = []
         self.current_preview_index = 0
         if not self.editor or not self.spr or not self.current_ids:
             self.clear_preview()
             return
             
+        things_dict = self.editor.things.get(category, {}) # Usa a categoria correta
+
         for item_id in self.current_ids:
-            item = self.editor.things['items'].get(item_id)
+            item = things_dict.get(item_id)
             if not item:
                 continue
             sprite_ids = DatEditor.extract_sprite_ids_from_texture_bytes(item['texture_bytes'])
             if sprite_ids:
                 self.current_preview_sprite_list = sprite_ids
                 break
+        
         if not self.current_preview_sprite_list:
             self.clear_preview()
             return
 
         self.current_preview_index = 0
-        self.show_preview_at_index(self.current_preview_index)
-        print("Item", item_id, "sprite_ids:", sprite_ids)              
+        self.show_preview_at_index(self.current_preview_index)   
 
     def clear_preview(self):
         try:
@@ -1751,7 +1845,7 @@ class DatSprTab(ctk.CTkFrame):
             size=(final_w, final_h)
         )
 
-        print(f"DEBUG UI: Size: {final_w}x{final_h}")
+        #print(f"DEBUG UI: Size: {final_w}x{final_h}")
         
         self.image_label.configure(image=tk_image, text="")
         
@@ -1762,11 +1856,8 @@ class DatSprTab(ctk.CTkFrame):
         self.image_label.update_idletasks()
         
     def build_loading_overlay(self):
-        # Cria um frame que cobrirá tudo. Usamos uma cor escura sólida (gray10) 
-        # ou preta para dar destaque.
         self.loading_overlay = ctk.CTkFrame(self, fg_color="gray10", corner_radius=0)
         
-        # Cria o label centralizado
         self.loading_label = ctk.CTkLabel(
             self.loading_overlay, 
             text="Loading...", 
@@ -1777,10 +1868,9 @@ class DatSprTab(ctk.CTkFrame):
 
     def show_loading(self, message="Loading..."):
         self.loading_label.configure(text=message)
-        # Place cobrindo tudo (relwidth=1, relheight=1)
+
         self.loading_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
         
-        # CRUCIAL: Força o desenho da tela antes de travar no processamento
         self.update() 
 
     def hide_loading(self):
