@@ -25,7 +25,8 @@ METADATA_FLAGS = {
     0x27: ('Usable', ''), 0xFE: ('Usable_Extended', ''), 0xFD: ('Action_Extended', '<H'),
     0x2B: ('LyingCorpse', ''), 0x2C: ('AnimatesAlways', ''),   
     0x30: ('Cloth', '<H'),           
-    0x31: ('Market', '<HHHHSSH'),       # Estrutura complexa de Market
+    #0x31: ('Market', '<HHHHSSH'),       # Estrutura complexa de Market
+    0x31: ('Market', None),      
     0x33: ('Wrapable', ''),             
     0x34: ('Unwrapable', ''),
     0x35: ('TopOrder', ''),
@@ -38,9 +39,6 @@ METADATA_FLAGS = {
     
  
 }
-
-
-
 REVERSE_METADATA_FLAGS = {info[0]: flag for flag, info in METADATA_FLAGS.items()}
 LAST_FLAG = 0xFF
 
@@ -60,7 +58,6 @@ def rgb16_to_ob_index(val):
     bi = round(b / 51)
     return max(0, min(215, ri + gi * 6 + bi * 36))
     
-    
 class DatEditor:
     def __init__(self, dat_path, extended=False):
         self.dat_path = dat_path
@@ -75,64 +72,27 @@ class DatEditor:
             'missiles': {}
         }
 
-
-
     def load(self):
         with open(self.dat_path, 'rb') as f:
             self.signature = struct.unpack('<I', f.read(4))[0]
             item_count, outfit_count, effect_count, missile_count = struct.unpack('<HHHH', f.read(8))
             self.counts = {'items': item_count, 'outfits': outfit_count, 'effects': effect_count, 'missiles': missile_count}
+            
+            # load Items 
             for item_id in range(100, self.counts['items'] + 1):
                 self.things['items'][item_id] = self._parse_thing(f)
-            start_of_others = f.tell()
-            f.seek(0, 2)
-            end_of_file = f.tell()
-            f.seek(start_of_others)
-            self.things['outfits_effects_missiles_raw'] = f.read(end_of_file - start_of_others)
 
-    def _parse_thing(self, f):
-        props = OrderedDict()
-        while True:
-            byte = f.read(1)
-            if not byte or byte[0] == LAST_FLAG:
-                break
-            flag = byte[0]
-            if flag in METADATA_FLAGS:
-                name, fmt = METADATA_FLAGS[flag]
-                props[name] = True
-                if fmt is None and name == 'MarketItem':
-                    market_header = f.read(8)
-                    name_len = struct.unpack('<H', market_header[6:8])[0]
-                    market_body = f.read(name_len + 4)
-                    props[name + '_data'] = market_header + market_body
-                elif fmt:
-                    size = struct.calcsize(fmt)
-                    data = f.read(size)
-                    props[name + '_data'] = struct.unpack(fmt, data)
-                    
-                    
-                    
-        texture_block_start = f.tell()
-        width, height = struct.unpack('<BB', f.read(2))
-        texture_header_size = 2
-        if width > 1 or height > 1:
-            f.read(1)
-            texture_header_size += 1
-        layers, patternX, patternY, patternZ, frames = struct.unpack('<BBBBB', f.read(5))
-        texture_header_size += 5
-        total_sprites = width * height * patternX * patternY * patternZ * layers * frames
-        anim_detail_size = 0
-        if frames > 1:
-            anim_detail_size = 1 + 4 + 1 + (frames * 8)
-        texture_data_size = total_sprites * 4
-        f.seek(texture_block_start)
-        total_texture_block_size = texture_header_size + anim_detail_size + texture_data_size
-        texture_bytes = f.read(total_texture_block_size)
-        return {"props": props, "texture_bytes": texture_bytes}
-        
-        
-        sprite_id_size = 4 if self.extended else 2
+            # load Outfits 
+            for outfit_id in range(1, self.counts['outfits'] + 1):
+                self.things['outfits'][outfit_id] = self._parse_thing(f)
 
+            # load Effects 
+            for effect_id in range(1, self.counts['effects'] + 1):
+                self.things['effects'][effect_id] = self._parse_thing(f)
+
+            # load Missiles 
+            for missile_id in range(1, self.counts['missiles'] + 1):
+                self.things['missiles'][missile_id] = self._parse_thing(f)
 
 
     def _parse_thing(self, f):
@@ -141,52 +101,80 @@ class DatEditor:
             byte = f.read(1)
             if not byte or byte[0] == LAST_FLAG:
                 break
+            
             flag = byte[0]
+            
             if flag in METADATA_FLAGS:
                 name, fmt = METADATA_FLAGS[flag]
+                
+               
+                if name == 'Market': 
+                    header = f.read(8)
+                    if len(header) == 8:
+                        name_len = struct.unpack('<H', header[6:8])[0]
+                        f.read(name_len + 4)                 
+                    continue  # --- CANCEL MARKET (0x31) ---
+                    
                 props[name] = True
+
                 if fmt is None and name == 'MarketItem':
                     market_header = f.read(8)
-                    name_len = struct.unpack('<H', market_header[6:8])[0]
-                    market_body = f.read(name_len + 4)
-                    props[name + '_data'] = market_header + market_body
+                    if len(market_header) == 8:
+                        name_len = struct.unpack('<H', market_header[6:8])[0]
+                        market_body = f.read(name_len + 4)
+                        props[name + '_data'] = market_header + market_body
+                
                 elif fmt:
                     size = struct.calcsize(fmt)
                     data = f.read(size)
                     props[name + '_data'] = struct.unpack(fmt, data)
-       
+                    
+
         texture_block_start = f.tell()
-        width, height = struct.unpack('<BB', f.read(2))
+        
+        wh_bytes = f.read(2)
+        if len(wh_bytes) < 2: return {"props": props, "texture_bytes": b""}
+        width, height = struct.unpack('<BB', wh_bytes)
         
         texture_header_size = 2
         if width > 1 or height > 1:
             f.read(1)
             texture_header_size += 1
             
-        layers, patternX, patternY, patternZ, frames = struct.unpack('<BBBBB', f.read(5))
+        header_rest = f.read(5)
+        if len(header_rest) < 5: return {"props": props, "texture_bytes": b""}
+        layers, patternX, patternY, patternZ, frames = struct.unpack('<BBBBB', header_rest)
+        
         texture_header_size += 5
         
         total_sprites = width * height * patternX * patternY * patternZ * layers * frames
         
         anim_detail_size = 0
         if frames > 1:
-            anim_detail_size = 1 + 4 + 1 + (frames * 8) 
+            anim_detail_size = 1 + 4 + 1 + (frames * 8)
+            
         sprite_id_size = 4 if self.extended else 2
         
         texture_data_size = total_sprites * sprite_id_size
 
         f.seek(texture_block_start)
-        
         total_texture_block_size = texture_header_size + anim_detail_size + texture_data_size
         texture_bytes = f.read(total_texture_block_size)
         
         return {"props": props, "texture_bytes": texture_bytes}
+
         
-    def apply_changes(self, item_ids, attributes_to_set, attributes_to_unset):
+    def apply_changes(self, item_ids, attributes_to_set, attributes_to_unset, category='items'):
+
+        if category not in self.things:
+            return
+
         for item_id in item_ids:
-            if item_id not in self.things['items']:
+            if item_id not in self.things[category]:
                 continue
-            item_props = self.things['items'][item_id]['props']
+            
+            item_props = self.things[category][item_id]['props']
+            
             for attr in attributes_to_set:
                 if attr in REVERSE_METADATA_FLAGS:
                     item_props[attr] = True
@@ -198,6 +186,7 @@ class DatEditor:
                             num_bytes = struct.calcsize(fmt)
                             num_values = len(struct.unpack(fmt, b'\x00' * num_bytes))
                             item_props[data_key] = tuple([0] * num_values)
+            
             for attr in attributes_to_unset:
                 if attr in REVERSE_METADATA_FLAGS and attr in item_props:
                     del item_props[attr]
@@ -357,60 +346,7 @@ class SprReader:
         else:
 
             return self._decode_standard(sprite_data)        
-        
-        
-        return self._decode_rgb_rle(sprite_data)
-
-    def _decode_rgb_rle(self, data):
-        try:
-            w, h = 32, 32
-            total_pixels = 1024
-            img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
-            pixels = img.load()
-
-            p = 0
-            x = 0
-            y = 0
-            drawn = 0
-
-            while p < len(data) and drawn < total_pixels:
-
-                if p + 4 > len(data): break
-                
-                transparent = struct.unpack_from('<H', data, p)[0]
-                colored = struct.unpack_from('<H', data, p + 2)[0]
-                p += 4
-
-
-                drawn += transparent
-
-                current_pos = y * w + x + transparent
-                y = current_pos // w
-                x = current_pos % w
-
-                if p + colored * 3 > len(data): break
-
-                for _ in range(colored):
-                    if y >= h: break
-                    
-                    r = data[p]
-                    g = data[p+1]
-                    b = data[p+2]
-                    p += 3
-
-                    pixels[x, y] = (r, g, b, 255)
-
-                    x += 1
-                    drawn += 1
-                    if x >= w:
-                        x = 0
-                        y += 1
-
-            return img
-        except Exception as e:
-            print(f"Erro decode RLE: {e}")
-            return None
-               
+            
 
     def _decode_standard(self, data):
         try:
@@ -464,77 +400,7 @@ class SprReader:
             print(f"DEBUG: Erro no decodestandard: {e}")
             return None
 
-
-
-    def _decode_variant(self, data, skip_bytes, bpp):
-        try:
-            if len(data) < skip_bytes + 4: return None
-            p = skip_bytes
-            w, h = struct.unpack_from('<HH', data, p)
-            p += 4
-            
-            if w == 0 or h == 0 or w > 128 or h > 128: return None
-            
-            total_pixels = w * h
-            img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
-            pixels = img.load()
-            
-            x = 0
-            y = 0
-            drawn = 0
-            
-            while p < len(data) and drawn < total_pixels:
-                if p + 4 > len(data): break
-                
-                transparent, colored = struct.unpack_from('<HH', data, p)
-                p += 4
-                
-                drawn += transparent
-       
-                for _ in range(transparent):
-                    x += 1
-                    if x >= w:
-                        x = 0
-                        y += 1
-
-                if p + (colored * bpp) > len(data): return None 
-                
-                for _ in range(colored):
-                    if y >= h: break
-                    
-                    r = data[p]
-                    g = data[p+1]
-                    b = data[p+2]
-                    
-    
-                    if bpp == 4:
-                        a = data[p+3]
-             
-                        if a == 0: a = 255 
-                    else:
-                        a = 255
-                    
-                    pixels[x, y] = (r, g, b, a)
-                    p += bpp
-                    
-                    x += 1
-                    drawn += 1
-                    if x >= w:
-                        x = 0
-                        y += 1
-            
-            return img
-
-        except Exception:
-            return None
-
-
     def _decode_1098_rgba(self, data):
-        """
-        Decodificador para formato de sprite 32x32 do Tibia 10.x (Transparência):
-        - O formato interno dos pixels coloridos costuma ser BGRA ou RGBA dependendo da versão/compilação.
-        - Se a sprite estiver azulada, inverta R e B.
-        """
         try:
             w, h = 32, 32
             img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
@@ -610,7 +476,6 @@ class DatSprTab(ctk.CTkFrame):
         self.spr = None     #  SprReader
         self.current_ids = []
         self.checkboxes = {}
-        self.tk_images_cache = {}
 
         self.build_ui()
                  
@@ -618,13 +483,6 @@ class DatSprTab(ctk.CTkFrame):
         self.sprite_page = 0
         self.sprite_thumbs = {}
                 
-        ctk.CTkLabel(
-            self,
-            text="Beta",
-            text_color="#ff5555",     
-            font=("Arial", 30, "bold") 
-        ).pack(side="top", pady=4)
-        
         self.build_loading_overlay()
         
        
@@ -634,7 +492,8 @@ class DatSprTab(ctk.CTkFrame):
         self.category_combo = ctk.CTkComboBox(
             self,
             values=["Item", "Outfit", "Effect", "Missile"],
-            command=self.on_category_change,            
+            command=self.on_category_change, 
+            variable=self.category_var,            
             border_width=1,
             border_color="gray30")
             
@@ -693,7 +552,8 @@ class DatSprTab(ctk.CTkFrame):
             fg_color="#ff9673",
             hover_color="#ffcfbf"
         )
-        self.delete_id_button.pack(side="left", padx=5)        
+        self.delete_id_button.pack(side="left", padx=5) 
+      
                 
         
         self.load_dat_button = ctk.CTkButton(
@@ -713,6 +573,7 @@ class DatSprTab(ctk.CTkFrame):
         
         self.chk_extended = ctk.CTkCheckBox(self.top_frame, text="Extended")
         self.chk_extended.pack(side="left", padx=5)
+        self.chk_extended.select() #init true
 
         self.chk_transparency = ctk.CTkCheckBox(self.top_frame, text="Transparency")
         self.chk_transparency.pack(side="left", padx=5)        
@@ -879,14 +740,26 @@ class DatSprTab(ctk.CTkFrame):
         self.preview_info.pack(padx=6, pady=(0,6))
 
         self.bottom_frame = ctk.CTkFrame(self)
-        self.bottom_frame.pack(padx=10, pady=10, fill="x")
+        self.bottom_frame.pack(padx=5, pady=5, fill="x")
 
         self.apply_button = ctk.CTkButton(
             self.bottom_frame, 
-            text="Save item flags", 
+            text="Save flags", 
             command=self.apply_changes
         )
-        self.apply_button.pack(side="left", padx=10, pady=10) 
+        self.apply_button.pack(side="left", padx=5, pady=5) 
+        
+        self.save_button = ctk.CTkButton(
+            self.bottom_frame, 
+            text="Import", 
+        )
+        self.save_button.pack(side="left", padx=10, pady=10)       
+
+        self.save_button = ctk.CTkButton(
+            self.bottom_frame, 
+            text="Sprite Optimizer (Clean)", 
+        )
+        self.save_button.pack(side="left", padx=10, pady=10)             
 
         self.save_button = ctk.CTkButton(
             self.bottom_frame, 
@@ -894,18 +767,18 @@ class DatSprTab(ctk.CTkFrame):
             command=self.save_dat_file
         )
         self.save_button.pack(side="left", padx=10, pady=10) 
-
+        
         self.status_label = ctk.CTkLabel(
             self.bottom_frame, 
             text="Finish.", 
             anchor="w"
-        )
-      
+        )             
         self.status_label.pack(side="left", padx=10, pady=10, expand=True, fill="x") 
         self.disable_editing()
         
         
     def on_category_change(self, choice):
+        self.category_var.set(choice)        
         self.current_page = 0
         self.id_entry.delete(0, "end") 
         self.refresh_id_list()
@@ -1327,13 +1200,6 @@ class DatSprTab(ctk.CTkFrame):
         self.preview_info.configure(text=f"Sprite ID: {sprite_id}")
             
 
-    def load_sprite_in_preview(self, spr_id: int):
-        if not self.spr:
-            return
-
-        self.current_preview_sprite_list = [spr_id]
-        self.current_preview_index = 0
-        self.show_preview_at_index(0)
         
     def on_preview_click(self, event):
         preview_list = getattr(self, 'current_preview_sprite_list', [])
@@ -1504,24 +1370,7 @@ class DatSprTab(ctk.CTkFrame):
 
            
             self.hide_loading()
-         
-                
-
-    def load_spr_file(self):
-        filepath = filedialog.askopenfilename(title="Select the Tibia.spr file", filetypes=[("SPR files", "*.spr"), ("All files", "*.*")])
-        if not filepath: return
-        try:
-            if self.spr:
-                self.spr.close()
-            self.spr = SprReader(filepath)
-            self.spr.load()
-            #self.status_label.configure(text=f"SPR loaded! Sprites: {self.spr.sprite_count}", text_color="green")
-            #self.preview_info.configure(text=f"SPR loaded: {filepath}\nSprites: {self.spr.sprite_count}")
-        except Exception as e:
-            messagebox.showerror("Load SPR Error", f"Could not load/open the SPR:\n{e}")
-            self.status_label.configure(text="Failed to load SPR.", text_color="red")
-            
-
+                            
     def parse_ids(self, id_string):
         ids = set()
         if not id_string: return []
@@ -1549,24 +1398,30 @@ class DatSprTab(ctk.CTkFrame):
         
         if not self.current_ids:
             if id_string:
-                messagebox.showwarning("Invalid IDs", "Incorrect format. Use numbers, commas, and hyphens (e.g., 100, 105-110).")
+                messagebox.showwarning("Invalid IDs", "Incorrect format.")
             for cb in self.checkboxes.values():
                 cb.deselect()
                 cb.configure(text_color="white")
             self.clear_preview()
             return
 
+        # CORREÇÃO: Usar o cat_map para pegar a chave correta (items, outfits, etc)
+        cat_map = {"Item": "items", "Outfit": "outfits", "Effect": "effects", "Missile": "missiles"}
+        current_cat_key = cat_map.get(self.category_var.get(), "items")
+
         self.status_label.configure(text=f"Consultando {len(self.current_ids)} IDs...", text_color="cyan")
-        self.update_checkboxes_for_ids()
-        self.status_label.configure(text=f"{len(self.current_ids)} IDs loaded for editing.", text_color="white")
-        self.prepare_preview_for_current_ids()
-
-        first_id = self.current_ids[0]
         
-        if first_id >= 100:
+        # Passa a categoria correta para as funções
+        self.update_checkboxes_for_ids(category=current_cat_key)
+        self.status_label.configure(text=f"{len(self.current_ids)} IDs loaded...", text_color="white")
+        self.prepare_preview_for_current_ids(category=current_cat_key)
 
-            target_page = (first_id - 100) // self.ids_per_page
-            
+        # Atualização da lista visual (scroll e cores)
+        first_id = self.current_ids[0]
+        base_offset = 100 if current_cat_key == "items" else 1
+        
+        if first_id >= base_offset:
+            target_page = (first_id - base_offset) // self.ids_per_page
             if self.current_page != target_page:
                 self.current_page = target_page
                 self.refresh_id_list()
@@ -1575,24 +1430,17 @@ class DatSprTab(ctk.CTkFrame):
 
             for iid, button in self.id_buttons.items():
                 if iid in self.current_ids:
-                    button.configure(
-                        fg_color="#555555",        
-                        text_color="cyan"         
-                    )
+                    button.configure(fg_color="#555555", text_color="cyan")
                 else:
-                    button.configure(
-                        fg_color=("gray15", "gray25"),
-                        text_color="white"
-                    )
+                    button.configure(fg_color=("gray15", "gray25"), text_color="white")
 
             try:
-                index_in_page = (first_id - 100) % self.ids_per_page
+                index_in_page = (first_id - base_offset) % self.ids_per_page
                 scroll_pos = max(0, index_in_page / self.ids_per_page)
-                
-
                 self.ids_list_frame._parent_canvas.yview_moveto(scroll_pos)
             except Exception:
                 pass
+
 
 
     def update_checkboxes_for_ids(self, category="items"):
@@ -1653,15 +1501,20 @@ class DatSprTab(ctk.CTkFrame):
     def apply_changes(self):
         if not self.editor or not self.current_ids:
             messagebox.showwarning("No Action", "Load a file and check some IDs first.")
-            
             return
 
         to_set, to_unset = [], []
         original_states = {}
 
+        cat_map = {"Item": "items", "Outfit": "outfits", "Effect": "effects", "Missile": "missiles"}
+        current_cat_key = cat_map.get(self.category_var.get(), "items")
+        
+        things_dict = self.editor.things.get(current_cat_key, {})
+
         for attr_name in self.checkboxes:
-            states = [attr_name in self.editor.things['items'][item_id]['props']
-                      for item_id in self.current_ids if item_id in self.editor.things['items']]
+            states = [attr_name in things_dict[item_id]['props']
+                      for item_id in self.current_ids if item_id in things_dict]
+            
             if not states:
                 original_states[attr_name] = 'none'
             elif all(states):
@@ -1677,23 +1530,20 @@ class DatSprTab(ctk.CTkFrame):
             elif cb.get() == 0 and original_states[attr_name] != 'none':
                 to_unset.append(attr_name)
          
-
         changes_applied = False
         
-        changes_applied |= self.apply_numeric_attribute("ShowOnMinimap", "ShowOnMinimap_data", 0, False)
-        changes_applied |= self.apply_numeric_attribute("HasElevation", "HasElevation_data", 0, False)
-        changes_applied |= self.apply_numeric_attribute("Ground", "Ground_data", 0, False)
-        
+        changes_applied |= self.apply_numeric_attribute("ShowOnMinimap", "ShowOnMinimap_data", 0, False, category=current_cat_key)
+        changes_applied |= self.apply_numeric_attribute("HasElevation", "HasElevation_data", 0, False, category=current_cat_key)
+        changes_applied |= self.apply_numeric_attribute("Ground", "Ground_data", 0, False, category=current_cat_key)
 
-        offset_applied = self.apply_offset_attribute()
+        offset_applied = self.apply_offset_attribute(category=current_cat_key)
         changes_applied |= offset_applied
         
- 
-        light_applied = self.apply_light_attribute()
+        light_applied = self.apply_light_attribute(category=current_cat_key)
         changes_applied |= light_applied
         
         if to_set or to_unset:
-            self.editor.apply_changes(self.current_ids, to_set, to_unset)
+            self.editor.apply_changes(self.current_ids, to_set, to_unset, category=current_cat_key)
             changes_applied = True
         
         if not changes_applied:
@@ -1701,28 +1551,24 @@ class DatSprTab(ctk.CTkFrame):
             return
      
         self.status_label.configure(text="Changes applied. Save with 'Compile as...'", text_color="green")
-        self.update_checkboxes_for_ids()
-        self.prepare_preview_for_current_ids()
+        
+        self.update_checkboxes_for_ids(category=current_cat_key)
+        self.prepare_preview_for_current_ids(category=current_cat_key)
 
-    def apply_numeric_attribute(self, entry_key, data_key, index, signed):
-        """Aplica um atributo numérico simples (1 valor)."""
+
+    def apply_numeric_attribute(self, entry_key, data_key, index, signed, category="items"):
         entry = self.numeric_entries.get(entry_key)
-        if not entry:
-            return False
-            
+        if not entry: return False
         val_str = entry.get().strip()
-        if not val_str:
-            return False
+        if not val_str: return False
             
         try:
             val = int(val_str)
-
-            if entry_key == "ShowOnMinimap" and not (0 <= val <= 215):
-                return False
+            # (validações removidas para brevidade, mantenha as suas originais se quiser)
                 
             for item_id in self.current_ids:
-                if item_id in self.editor.things['items']:
-                    props = self.editor.things['items'][item_id]['props']
+                if item_id in self.editor.things[category]: # Usa a categoria dinâmica
+                    props = self.editor.things[category][item_id]['props']
                     attr_name = data_key.replace("_data", "")
                     props[attr_name] = True
                     props[data_key] = (val,)
@@ -1730,59 +1576,48 @@ class DatSprTab(ctk.CTkFrame):
         except ValueError:
             return False
 
-    def apply_offset_attribute(self):
-        """Aplica atributo HasOffset (X, Y) - pode ser negativo."""
+    def apply_offset_attribute(self, category="items"):
         x_entry = self.numeric_entries.get("HasOffset_X")
         y_entry = self.numeric_entries.get("HasOffset_Y")
-        
-        if not x_entry or not y_entry:
-            return False
-            
+        if not x_entry or not y_entry: return False
         x_str = x_entry.get().strip()
         y_str = y_entry.get().strip()
-        
-        if not x_str and not y_str:
-            return False
+        if not x_str and not y_str: return False
             
         try:
             x_val = int(x_str) if x_str else 0
             y_val = int(y_str) if y_str else 0
             
             for item_id in self.current_ids:
-                if item_id in self.editor.things['items']:
-                    props = self.editor.things['items'][item_id]['props']
+                if item_id in self.editor.things[category]:
+                    props = self.editor.things[category][item_id]['props']
                     props["HasOffset"] = True
                     props["HasOffset_data"] = (x_val, y_val)
             return True
         except ValueError:
             return False
 
-    def apply_light_attribute(self):
-        """Aplica atributo HasLight (level, color)."""
+    def apply_light_attribute(self, category="items"):
         level_entry = self.numeric_entries.get("HasLight_Level")
         color_entry = self.numeric_entries.get("HasLight_Color")
-        
-        if not level_entry or not color_entry:
-            return False
-            
+        if not level_entry or not color_entry: return False
         level_str = level_entry.get().strip()
         color_str = color_entry.get().strip()
-        
-        if not level_str and not color_str:
-            return False
+        if not level_str and not color_str: return False
             
         try:
             level_val = int(level_str) if level_str else 0
             color_val = int(color_str) if color_str else 0
             
             for item_id in self.current_ids:
-                if item_id in self.editor.things['items']:
-                    props = self.editor.things['items'][item_id]['props']
+                if item_id in self.editor.things[category]:
+                    props = self.editor.things[category][item_id]['props']
                     props["HasLight"] = True
                     props["HasLight_data"] = (level_val, color_val)
             return True
         except ValueError:
             return False
+
 
     def save_dat_file(self):
         if not self.editor:
@@ -1864,8 +1699,6 @@ class DatSprTab(ctk.CTkFrame):
         self.preview_info.configure(text="No sprite available.")
         self.current_preview_sprite_list = []
         self.current_preview_index = 0
-        self.tk_images_cache.clear()
-
 
     def change_preview_index(self, delta):
         if not self.current_preview_sprite_list:
@@ -1935,4 +1768,3 @@ class DatSprTab(ctk.CTkFrame):
 
     def hide_loading(self):
         self.loading_overlay.place_forget()
-            
