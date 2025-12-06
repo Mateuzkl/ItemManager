@@ -18,6 +18,8 @@ class ImageUpscaleTab(ctk.CTkFrame):
         self.output_photos = []
         
         self.build_ui()
+        
+        self.build_loading_overlay()        
 
     def build_ui(self):
         # Frame principal do Sprite Manager
@@ -51,6 +53,33 @@ class ImageUpscaleTab(ctk.CTkFrame):
 
         self.status = ctk.CTkLabel(self, text="Finish!", text_color="lightgreen")
         self.status.pack(pady=5)
+        
+        
+
+    def build_loading_overlay(self):
+        self.loading_overlay = ctk.CTkFrame(self, fg_color="gray10", corner_radius=0)
+        
+        # Cria o label centralizado
+        self.loading_label = ctk.CTkLabel(
+            self.loading_overlay, 
+            text="Loading...", 
+            font=("Arial", 24, "bold"),
+            text_color="white"
+        )
+        self.loading_label.place(relx=0.5, rely=0.5, anchor="center")
+
+    def show_loading(self, message="Loading..."):
+        self.loading_label.configure(text=message)
+        # Place cobrindo tudo (relwidth=1, relheight=1)
+        self.loading_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
+        
+        # CRUCIAL: Força o desenho da tela antes de travar no processamento
+        self.update() 
+
+    def hide_loading(self):
+        self.loading_overlay.place_forget()
+        
+        
 
     # ------------------- GUI Helpers -------------------
     def create_advanced_adjustments(self, parent):
@@ -225,6 +254,10 @@ class ImageUpscaleTab(ctk.CTkFrame):
         self.log_box.see("end")
 
     def process_pillow_image(self, img):
+        
+        
+        self.show_loading("Loading...\nPlease wait.") 
+        
         img = ImageEnhance.Brightness(img).enhance(self.brightness_slider.get())
         img = ImageEnhance.Contrast(img).enhance(self.contrast_slider.get())
         img = ImageEnhance.Color(img).enhance(self.color_slider.get())
@@ -247,6 +280,8 @@ class ImageUpscaleTab(ctk.CTkFrame):
             img = img.transpose(Image.FLIP_TOP_BOTTOM)
 
         return img
+        
+        self.hide_loading()          
 
     def convert_images_thread(self):
         threading.Thread(target=self.convert_images, daemon=True).start()
@@ -256,7 +291,8 @@ class ImageUpscaleTab(ctk.CTkFrame):
         if not os.path.isdir(folder):
             messagebox.showerror("Error", "Select a valid folder!")
             return
-
+        self.show_loading("Loading...\nPlease wait.") 
+        
         denoise_enabled = self.use_denoise.get()
         upscale_enabled = self.use_upscale.get()
         resize_enabled = self.use_resize.get()
@@ -333,4 +369,4 @@ class ImageUpscaleTab(ctk.CTkFrame):
         self.status.configure(text=f"Completed! {count} processed images.")
         messagebox.showinfo("Ready", f"{count} Images were successfully generated!")
 
-      
+        self.hide_loading()       
