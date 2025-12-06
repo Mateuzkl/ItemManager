@@ -62,9 +62,10 @@ def rgb16_to_ob_index(val):
     
     
 class DatEditor:
-    def __init__(self, dat_path):
+    def __init__(self, dat_path, extended=False):
         self.dat_path = dat_path
         self.signature = 0
+        self.extended = extended   
 
         self.counts = {'items': 0, 'outfits': 0, 'effects': 0, 'missiles': 0}
         self.things = {
@@ -108,6 +109,9 @@ class DatEditor:
                     size = struct.calcsize(fmt)
                     data = f.read(size)
                     props[name + '_data'] = struct.unpack(fmt, data)
+                    
+                    
+                    
         texture_block_start = f.tell()
         width, height = struct.unpack('<BB', f.read(2))
         texture_header_size = 2
@@ -125,10 +129,56 @@ class DatEditor:
         total_texture_block_size = texture_header_size + anim_detail_size + texture_data_size
         texture_bytes = f.read(total_texture_block_size)
         return {"props": props, "texture_bytes": texture_bytes}
+    
+        sprite_id_size = 4 if self.extended else 2
 
+    def _parse_thing(self, f):
+        props = OrderedDict()
+        while True:
+            byte = f.read(1)
+            if not byte or byte[0] == LAST_FLAG:
+                break
+            flag = byte[0]
+            if flag in METADATA_FLAGS:
+                name, fmt = METADATA_FLAGS[flag]
+                props[name] = True
+                if fmt is None and name == 'MarketItem':
+                    market_header = f.read(8)
+                    name_len = struct.unpack('<H', market_header[6:8])[0]
+                    market_body = f.read(name_len + 4)
+                    props[name + '_data'] = market_header + market_body
+                elif fmt:
+                    size = struct.calcsize(fmt)
+                    data = f.read(size)
+                    props[name + '_data'] = struct.unpack(fmt, data)
+       
+        texture_block_start = f.tell()
+        width, height = struct.unpack('<BB', f.read(2))
+        
+        texture_header_size = 2
+        if width > 1 or height > 1:
+            f.read(1)
+            texture_header_size += 1
+            
+        layers, patternX, patternY, patternZ, frames = struct.unpack('<BBBBB', f.read(5))
+        texture_header_size += 5
+        
+        total_sprites = width * height * patternX * patternY * patternZ * layers * frames
+        
+        anim_detail_size = 0
+        if frames > 1:
+            anim_detail_size = 1 + 4 + 1 + (frames * 8) 
+        sprite_id_size = 4 if self.extended else 2
+        
+        texture_data_size = total_sprites * sprite_id_size
 
-
-     
+        f.seek(texture_block_start)
+        
+        total_texture_block_size = texture_header_size + anim_detail_size + texture_data_size
+        texture_bytes = f.read(total_texture_block_size)
+        
+        return {"props": props, "texture_bytes": texture_bytes}
+        
     def apply_changes(self, item_ids, attributes_to_set, attributes_to_unset):
         for item_id in item_ids:
             if item_id not in self.things['items']:
@@ -232,12 +282,13 @@ class DatEditor:
             return []
 
 class SprReader:
-    def __init__(self, spr_path):
+    def __init__(self, spr_path, transparency=False):
         self.spr_path = spr_path
         self.signature = 0
         self.sprite_count = 0
         self.offsets = []
         self._f = None
+        self.transparency = transparency        
 
     def load(self):
         self._f = open(self.spr_path, 'rb')
@@ -296,6 +347,14 @@ class SprReader:
             
         sprite_data = raw_data[start_idx:]
         
+        
+        if self.transparency:
+
+            return self._decode_1098_rgba(sprite_data)
+        else:
+            return self._decode_standard(sprite_data)        
+        
+        
         return self._decode_rgb_rle(sprite_data)
 
     def _decode_rgb_rle(self, data):
@@ -347,9 +406,6 @@ class SprReader:
         except Exception as e:
             print(f"Erro decode RLE: {e}")
             return None
-        
-        
-        
 
     def _decode_standard(self, data):
         try:
@@ -649,6 +705,14 @@ class DatSprTab(ctk.CTkFrame):
             text_color="gray"
         )
         self.file_label.pack(side="left", padx=10, expand=True, fill="x")
+        
+        
+        self.chk_extended = ctk.CTkCheckBox(self.top_frame, text="Extended")
+        self.chk_extended.pack(side="left", padx=5)
+
+        self.chk_transparency = ctk.CTkCheckBox(self.top_frame, text="Transparency")
+        self.chk_transparency.pack(side="left", padx=5)        
+                
         
      
         self.id_frame = ctk.CTkFrame(self, border_width=1, border_color="gray30")        
@@ -1189,8 +1253,6 @@ class DatSprTab(ctk.CTkFrame):
             ).pack(side="left", padx=5)
     
             self.hide_loading()
-
-    
             
     def update_list_selection_visuals(self):
         """
@@ -1383,10 +1445,13 @@ class DatSprTab(ctk.CTkFrame):
             return
 
         self.show_loading("Loading...\nPlease wait.")
-
+        
+        is_extended = bool(self.chk_extended.get())
+        is_transparency = bool(self.chk_transparency.get())
+        
         try:
 
-            self.editor = DatEditor(filepath)
+            self.editor = DatEditor(filepath, extended=is_extended)            
             self.editor.load()
             self.current_page = 0
 
@@ -1402,7 +1467,7 @@ class DatSprTab(ctk.CTkFrame):
                 if hasattr(self, 'spr') and self.spr:
                     self.spr.close()
 
-                self.spr = SprReader(spr_path)
+                self.spr = SprReader(spr_path, transparency=is_transparency)
                 self.spr.load()
 
                 self.status_label.configure(
@@ -1530,12 +1595,10 @@ class DatSprTab(ctk.CTkFrame):
 
     def update_checkboxes_for_ids(self, category="items"):
         if not self.current_ids: return
-        
-        # Usa a categoria passada, não 'items' fixo
+
         things_dict = self.editor.things.get(category, {})
 
         for attr_name, cb in self.checkboxes.items():
-            # Verifica no dicionário correto
             states = [attr_name in things_dict[item_id]['props'] 
                      for item_id in self.current_ids if item_id in things_dict]
             
@@ -1548,7 +1611,6 @@ class DatSprTab(ctk.CTkFrame):
             else:
                 cb.deselect(); cb.configure(text_color="cyan")
         
-        # Para atributos numéricos, também precisamos passar a categoria (veja abaixo)
         self.load_numeric_attribute("ShowOnMinimap", "ShowOnMinimap_data", 0, category)
         self.load_numeric_attribute("HasElevation", "HasElevation_data", 0, category)
         self.load_numeric_attribute("Ground", "Ground_data", 0, category)
@@ -1562,7 +1624,7 @@ class DatSprTab(ctk.CTkFrame):
         if not entry: return
             
         values = []
-        things_dict = self.editor.things.get(category, {}) # Usa a categoria correta
+        things_dict = self.editor.things.get(category, {}) 
 
         for item_id in self.current_ids:
             item = things_dict.get(item_id)
@@ -1571,7 +1633,6 @@ class DatSprTab(ctk.CTkFrame):
                 if isinstance(data, tuple) and len(data) > index:
                     values.append(data[index])
         
-        # ... (resto da função permanece igual) ...
         if not values:
             entry.delete(0, "end")
             if entry_key in self.numeric_previews:
@@ -1591,7 +1652,6 @@ class DatSprTab(ctk.CTkFrame):
             messagebox.showwarning("No Action", "Load a file and check some IDs first.")
             
             return
- 
 
         to_set, to_unset = [], []
         original_states = {}
@@ -1614,7 +1674,6 @@ class DatSprTab(ctk.CTkFrame):
             elif cb.get() == 0 and original_states[attr_name] != 'none':
                 to_unset.append(attr_name)
          
-
         changes_applied = False
         
         changes_applied |= self.apply_numeric_attribute("ShowOnMinimap", "ShowOnMinimap_data", 0, False)
@@ -1868,7 +1927,6 @@ class DatSprTab(ctk.CTkFrame):
 
     def show_loading(self, message="Loading..."):
         self.loading_label.configure(text=message)
-
         self.loading_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
         
         self.update() 
