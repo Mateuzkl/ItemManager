@@ -1,5 +1,5 @@
 import customtkinter as ctk
-from tkinter import filedialog, messagebox, Canvas
+from tkinter import filedialog, messagebox, Canvas, Menu
 from collections import OrderedDict
 import struct
 import threading
@@ -513,10 +513,10 @@ class DatSprTab(ctk.CTkFrame):
         self.is_animating = not self.is_animating
 
         if self.is_animating:
-            self.anim_btn.configure(text="⏹", fg_color="#ff5555") # Ícone Stop, cor vermelha
+            self.anim_btn.configure(text="⏹", fg_color="#ff5555") 
             self.animate_loop()
         else:
-            self.anim_btn.configure(text="▶", fg_color="#444444") # Ícone Play, cor original
+            self.anim_btn.configure(text="▶", fg_color="#444444") 
             if self.anim_job:
                 self.after_cancel(self.anim_job)
                 self.anim_job = None
@@ -527,29 +527,22 @@ class DatSprTab(ctk.CTkFrame):
             self.anim_btn.configure(text="▶", fg_color="#444444")
             return
 
-        # Calcula quantos frames existem no total para este item
         group_size = self.current_item_width * self.current_item_height * self.current_item_layers
         if group_size == 0: group_size = 1
         total_views = len(self.current_preview_sprite_list) // group_size
         
         if total_views <= 1:
-            # Se só tem 1 frame, não precisa animar
             self.toggle_animation()
             return
 
-        # Avança para o próximo frame
         next_index = self.current_preview_index + 1
         if next_index >= total_views:
             next_index = 0
             
-        # Atualiza a visualização
         self.show_preview_at_index(next_index)
         
-        # Agenda o próximo frame (ex: 200ms de delay)
-        self.anim_job = self.after(200, self.animate_loop)
-        
-        
-       
+        self.anim_job = self.after(100, self.animate_loop)
+              
     def build_ui(self):
         
         self.category_var = ctk.StringVar(value="Item")
@@ -677,7 +670,6 @@ class DatSprTab(ctk.CTkFrame):
         self.main_layout.grid_rowconfigure(1, weight=0)
 
 
-        # ... (código anterior do scrollable frame)
         self.attributes_frame = ctk.CTkScrollableFrame(
             self.main_layout,
             label_text="Flags",
@@ -868,13 +860,6 @@ class DatSprTab(ctk.CTkFrame):
         
         self.save_button = ctk.CTkButton(
             self.bottom_frame, 
-            text="Import", 
-            width=15,                    
-        )
-        self.save_button.pack(side="left", padx=5, pady=5)       
-
-        self.save_button = ctk.CTkButton(
-            self.bottom_frame, 
             text="Sprite Optimizer (Clean)", 
         )
         self.save_button.pack(side="left", padx=5, pady=5)             
@@ -895,6 +880,114 @@ class DatSprTab(ctk.CTkFrame):
         )             
         self.status_label.pack(side="left", padx=7, pady=10, expand=True, fill="x") 
         self.disable_editing()
+        
+        
+        self.context_menu = Menu(self, tearoff=0)
+        self.context_menu.add_command(label="Import", command=self.on_context_import)
+        self.context_menu.add_command(label="Export", command=self.on_context_export)
+        self.context_menu.add_command(label="Replace", command=self.on_context_replace)
+        self.context_menu.add_command(label="Clear", command=self.on_context_delete)
+        self.right_click_target = None
+        
+        
+        
+    def show_context_menu(self, event, item_id, context_type):
+        self.right_click_target = {"id": item_id, "type": context_type}
+        try:
+            self.context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.context_menu.grab_release()
+
+    def on_context_export(self):
+        if not self.right_click_target:
+            return
+            
+        target_id = self.right_click_target["id"]
+        target_type = self.right_click_target["type"]
+        try:
+            img_to_save = None
+            default_name = ""
+
+            if target_type == "sprite_list":
+                if self.spr:
+                    img_to_save = self.spr.get_sprite(target_id)
+                    default_name = f"sprite_{target_id}.png"
+            
+            elif target_type == "id_list":
+                cat_map = {"Item": "items", "Outfit": "outfits", "Effect": "effects", "Missile": "missiles"}
+                current_cat_key = cat_map.get(self.category_var.get(), "items")
+                
+                if self.editor and target_id in self.editor.things[current_cat_key]:
+                    item = self.editor.things[current_cat_key][target_id]
+                    sprite_ids = DatEditor.extract_sprite_ids_from_texture_bytes(item['texture_bytes'])
+                    if sprite_ids and sprite_ids[0] > 0 and self.spr:
+                        img_to_save = self.spr.get_sprite(sprite_ids[0])
+                        default_name = f"{current_cat_key}_{target_id}.png"
+
+            if img_to_save:
+                save_path = filedialog.asksaveasfilename(
+                    defaultextension=".png",
+                    filetypes=[("PNG Image", "*.png")],
+                    initialfile=default_name,
+                    title="Export Image"
+                )
+                if save_path:
+                    img_to_save.save(save_path)
+                    messagebox.showinfo("Export", f"Saved to {save_path}")
+            else:
+                messagebox.showwarning("Export", "No image data found for this ID.")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export: {e}")
+            
+            
+    def on_context_delete(self):
+        if not self.right_click_target:
+            return
+
+        target_id = self.right_click_target["id"]
+        target_type = self.right_click_target["type"]
+
+        confirm = messagebox.askyesno(
+            "Confirm Clear",
+            f"Are you sure you want to clear {target_type} ID {target_id}?\nThis action cannot be undone."
+        )
+        if not confirm:
+            return
+
+        if target_type == "id_list":
+            if not self.editor:
+                return
+
+            cat_map = {"Item": "items", "Outfit": "outfits", "Effect": "effects", "Missile": "missiles"}
+            current_cat_key = cat_map.get(self.category_var.get(), "items")
+
+            if target_id in self.editor.things[current_cat_key]:
+                minimal_texture = b'\x01\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00'
+                
+                self.editor.things[current_cat_key][target_id] = {
+                    "props": OrderedDict(),
+                    "texture_bytes": minimal_texture
+                }
+                
+                self.refresh_id_list() 
+                self.load_single_id(target_id)
+                self.status_label.configure(text=f"ID {target_id} cleared successfully.", text_color="green")
+
+
+        elif target_type == "sprite_list":
+            messagebox.showinfo("Not Implemented", "Sprite clearing requires SPR write logic.\nImplement 'replace_sprite' first.")
+            
+
+    def on_context_import(self):
+        target = self.right_click_target
+        messagebox.showinfo("Import", f"Import clicked for {target['type']} ID: {target['id']}\n(Feature not implemented yet)")
+
+    def on_context_replace(self):
+        target = self.right_click_target
+        messagebox.showinfo("Replace", f"Replace clicked for {target['type']} ID: {target['id']}\n(Feature not implemented yet)")
+        
+        
         
         
     def on_category_change(self, choice):
@@ -1162,6 +1255,10 @@ class DatSprTab(ctk.CTkFrame):
             sprite_label.bind("<Button-1>", lambda e, iid=item_id: self.load_single_id(iid))
             id_label.bind("<Button-1>", lambda e, iid=item_id: self.load_single_id(iid))
             
+            item_frame.bind("<Button-3>", lambda e, iid=item_id: self.show_context_menu(e, iid, "id_list"))
+            sprite_label.bind("<Button-3>", lambda e, iid=item_id: self.show_context_menu(e, iid, "id_list"))
+            id_label.bind("<Button-3>", lambda e, iid=item_id: self.show_context_menu(e, iid, "id_list"))
+                
             self.id_buttons[item_id] = id_label
 
         nav_frame = ctk.CTkFrame(self.ids_list_frame)
@@ -1228,8 +1325,10 @@ class DatSprTab(ctk.CTkFrame):
             item_frame.bind("<Button-1>", on_item_click)
             img_label.bind("<Button-1>", on_item_click)
             text_label.bind("<Button-1>", on_item_click)
-
-
+            
+            item_frame.bind("<Button-3>", lambda e, sid=spr_id: self.show_context_menu(e, sid, "sprite_list"))
+            img_label.bind("<Button-3>", lambda e, sid=spr_id: self.show_context_menu(e, sid, "sprite_list"))
+            text_label.bind("<Button-3>", lambda e, sid=spr_id: self.show_context_menu(e, sid, "sprite_list"))
 
         nav = ctk.CTkFrame(self.sprite_list_frame)
         nav.pack(pady=10)
