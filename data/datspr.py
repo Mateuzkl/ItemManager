@@ -631,6 +631,7 @@ class DatSprTab(ctk.CTkFrame):
         self.main_layout.grid_rowconfigure(1, weight=0)
 
 
+        # ... (código anterior do scrollable frame)
         self.attributes_frame = ctk.CTkScrollableFrame(
             self.main_layout,
             label_text="Flags",
@@ -639,15 +640,47 @@ class DatSprTab(ctk.CTkFrame):
         )
         self.attributes_frame.grid(row=0, column=0, padx=10, pady=5, sticky="nsew")
 
-        attr_names = sorted(REVERSE_METADATA_FLAGS.keys())
-        num_attrs = len(attr_names)
-        items_per_col = (num_attrs + 2) // 2
+        #Internal Flags
+        INTERNAL_FLAGS = [
+            "Market", 
+            "MarketItem", 
+            "UpgradeClassification", 
+            "Structure1098",
+            "Usable_Extended",
+            "Action_Extended",
+            "NoTrade",
+            "ReverseDesc",
+            "NoDrop",
+            "NoDivination",
+            "Wirable",
+            "TopOrder",
+            "TopOrder",
+            "Cloth",
+            "LyingCorpse",
+            "LyingObject",
+            "Translucent",
+            "Wrapable",
+            "Wrappable",
+            "Unwrapable",
+            "Unwrappable",
+        ]
 
-        for i, attr_name in enumerate(attr_names):
+
+        all_attr_names = sorted(REVERSE_METADATA_FLAGS.keys())
+        
+        visible_attr_names = [name for name in all_attr_names if name not in INTERNAL_FLAGS]
+
+
+        num_attrs = len(visible_attr_names)
+        items_per_col = (num_attrs + 1) // 2 
+
+        for i, attr_name in enumerate(visible_attr_names):
             row = i % items_per_col
             col = i // items_per_col
+            
             cb = ctk.CTkCheckBox(self.attributes_frame, text=attr_name)
             cb.grid(row=row, column=col, padx=10, pady=5, sticky="w")
+            
             self.checkboxes[attr_name] = cb
 
         self.direction_frame = ctk.CTkScrollableFrame(
