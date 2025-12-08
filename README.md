@@ -20,7 +20,7 @@ Features:
   - Extension .obd (Object Builder)
   - Only 1098, it is not recommended for other versions.
 
-- Image Enhancer
+- ImageUpscale
   - Upscale: 2, 4, 8
   - Denoise Level: 1, 2, 3 
   - Resize: 32x32, 64x64, 128x128, 512x512
@@ -30,7 +30,8 @@ Features:
     - Mirror Horizontal
     - Color Adjust
     - Rotation
-  - Import Spr
+  - Import Manual and Auto to Spr (Path Mode)
+  - Process Full Loaded SPR (Not Recommended)
  
 - Spr/Dat Editor (EXPERIMENTAL)
   - Edit Item/Outfit/Missile/Effects
