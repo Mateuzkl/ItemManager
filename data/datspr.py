@@ -1,12 +1,16 @@
-import customtkinter as ctk
-from tkinter import filedialog, messagebox, Canvas, Menu
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
+                             QLabel, QPushButton, QLineEdit, QCheckBox, QComboBox,
+                             QScrollArea, QFrame, QFileDialog, QMessageBox, QMenu,
+                             QSizePolicy, QApplication)
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPoint,QMimeData
+from PyQt6.QtGui import QPixmap, QImage, QColor, QPainter, QContextMenuEvent, QDrag, QCursor
 from collections import OrderedDict
 import struct
-import threading
 import os
-from PIL import Image, ImageTk
+from PIL import Image
 import shutil
 import atexit
+
 
 METADATA_FLAGS = {
     0x00: ('Ground', '<H'), 0x01: ('GroundBorder', ''), 0x02: ('OnBottom', ''),
@@ -559,8 +563,127 @@ class SprEditor:
                 
         return output
         
-class DatSprTab(ctk.CTkFrame):
-    def __init__(self, parent):
+def pil_to_qpixmap(pil_image):
+    """Converte PIL Image para QPixmap"""
+    if pil_image is None:
+        return QPixmap()
+    
+    if pil_image.mode == 'RGBA':
+        qimage = QImage(pil_image.tobytes("raw", "RGBA"), pil_image.size[0], pil_image.size[1], QImage.Format.Format_RGBA8888)
+    elif pil_image.mode == 'RGB':
+        qimage = QImage(pil_image.tobytes("raw", "RGB"), pil_image.size[0], pil_image.size[1], QImage.Format.Format_RGB888)
+    else:
+        qimage = QImage(pil_image.tobytes("raw", pil_image.mode), pil_image.size[0], pil_image.size[1], QImage.Format.Format_RGB888)
+    
+    return QPixmap.fromImage(qimage)
+
+class ScrollableFrame(QWidget):
+    """Widget scrollável customizado"""
+    def __init__(self, parent=None, label_text=""):
+        super().__init__(parent)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(5, 5, 5, 5)
+        self.layout.setSpacing(2)
+        
+        if label_text:
+            label = QLabel(label_text)
+            label.setStyleSheet("font-weight: bold; padding: 5px;")
+            self.layout.addWidget(label)
+        
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_widget = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_widget)
+        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.scroll_layout.setSpacing(2)
+        self.scroll.setWidget(self.scroll_widget)
+        self.layout.addWidget(self.scroll)
+    
+
+class ClickableLabel(QLabel):
+    """QLabel com suporte a eventos de clique"""
+    doubleClicked = pyqtSignal()
+    rightClicked = pyqtSignal(QPoint)
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setMouseTracking(True)
+    
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.doubleClicked.emit()
+        super().mouseDoubleClickEvent(event)
+    
+    def contextMenuEvent(self, event):
+        self.rightClicked.emit(event.globalPos())
+        super().contextMenuEvent(event)
+        
+        
+class DraggableLabel(ClickableLabel):
+    """Label que permite arrastar o Sprite ID."""
+    def __init__(self, sprite_id, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sprite_id = sprite_id
+        self.drag_start_position = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_start_position = event.pos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            return
+        if not self.drag_start_position:
+            return
+        
+        if (event.pos() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
+            return
+
+        drag = QDrag(self)
+        mime_data = QMimeData()
+        
+        mime_data.setText(str(self.sprite_id))
+        drag.setMimeData(mime_data)
+        )
+        if self.pixmap():
+            drag.setPixmap(self.pixmap().scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio))
+            drag.setHotSpot(QPoint(16, 16))
+
+        drag.exec(Qt.DropAction.CopyAction)
+
+class DroppablePreviewLabel(ClickableLabel):
+    """Label de Preview que aceita Sprites soltos e informa a posição."""
+    spriteDropped = pyqtSignal(int, QPoint) 
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasText():
+            try:
+                int(event.mimeData().text())
+                event.acceptProposedAction()
+            except ValueError:
+                event.ignore()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        try:
+            sprite_id = int(event.mimeData().text())
+            
+            drop_position = event.position().toPoint()
+            
+            self.spriteDropped.emit(sprite_id, drop_position)
+            event.acceptProposedAction()
+        except ValueError:
+            event.ignore()
+
+class DatSprTab(QWidget):
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.editor = None  #  DatEditor
         self.spr = None     #  SprEditor        
@@ -569,187 +692,119 @@ class DatSprTab(ctk.CTkFrame):
         self.current_preview_index = 0
         self.selected_sprite_id = None 
         self.is_animating = False
-        self.anim_job = None          
-        self.visible_sprite_widgets = {}  
-        self.dragged_sprite_id = None         
+        self.anim_timer = None          
+        self.visible_sprite_widgets = {}        
         self.current_ids = []
         self.checkboxes = {}
-        self.build_ui()              
         self.sprites_per_page = 250
         self.sprite_page = 0
         self.sprite_thumbs = {}               
+        self.build_ui()             
         self.build_loading_overlay()
              
     def build_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(5)
         
-        self.category_var = ctk.StringVar(value="Item")
-        self.category_combo = ctk.CTkComboBox(
-            self,
-            values=["Item", "Outfit", "Effect", "Missile"],
-            command=self.on_category_change, 
-            variable=self.category_var,            
-            border_width=1,
-            border_color="gray30")
-            
-        self.category_combo.pack(
-            side="top",
-            anchor="w",   
-            padx= 10,
-            pady= 1 )
+        # Top frame - file loading
+        top_frame = QHBoxLayout()
         
+        self.load_dat_button = QPushButton("Load dat/spr (10.98)")
+        self.load_dat_button.clicked.connect(self.load_dat_file)
+        top_frame.addWidget(self.load_dat_button)
         
-        self.ids_list_frame = ctk.CTkScrollableFrame(self, label_text="List ID", border_width=1, border_color="gray30")        
-        self.ids_list_frame.pack(side="left", padx=10, pady=2, fill="y")
+        self.file_label = QLabel("No file loaded.")
+        self.file_label.setStyleSheet("color: gray;")
+        top_frame.addWidget(self.file_label, 1)
         
-        self.sprite_list_frame = ctk.CTkScrollableFrame(self, label_text="List Sprites", border_width=1, border_color="gray30")        
-        self.sprite_list_frame.pack(side="right", padx=10, pady=2, fill="y")       
+        self.chk_extended = QCheckBox("Extended")
+        self.chk_extended.setChecked(True)
+        top_frame.addWidget(self.chk_extended)
         
-        self.selected_sprite_id = None 
-        self.id_buttons = {}
-        self.ids_per_page = 250
-        self.current_page = 0
-
-        self.top_frame = ctk.CTkFrame(self)
-        self.top_frame.pack(padx=10, pady=10, fill="x")
+        self.chk_transparency = QCheckBox("Transparency")
+        top_frame.addWidget(self.chk_transparency)
         
+        main_layout.addLayout(top_frame)
         
-        self.bottom_frame = ctk.CTkFrame(self, border_width=1, border_color="gray30")
-        self.bottom_frame.pack(padx=10, pady=10, fill="x")
-
-        id_operations_frame = ctk.CTkFrame(self.bottom_frame)
-        id_operations_frame.pack(side="left", padx=10, pady=1)
-
-        ctk.CTkLabel(id_operations_frame, text="Manage IDs:").pack(side="left", padx=(0, 5), pady=1)
-
-        self.id_operation_entry = ctk.CTkEntry(
-            id_operations_frame,
-            placeholder_text="ID (ex: 100-105)",
-            width=120
-        )
-        self.id_operation_entry.pack(side="left", padx=5)
-
-        self.insert_id_button = ctk.CTkButton(
-            id_operations_frame,
-            text="Insert ID",
-            command=self.insert_ids,
-            width=90,
-            fg_color="#99ff99",
-            hover_color="#bfffbf"
-        )
-        self.insert_id_button.pack(side="left", padx=5)
-
-        self.delete_id_button = ctk.CTkButton(
-            id_operations_frame,
-            text="Delete ID",
-            command=self.delete_ids,
-            width=90,
-            fg_color="#ff9673",
-            hover_color="#ffcfbf"
-        )
-        self.delete_id_button.pack(side="left", padx=5) 
-                       
-        self.load_dat_button = ctk.CTkButton(
-            self.top_frame, 
-            text="Load dat/spr (10.98)", 
-            command=self.load_dat_file
-        )
-        self.load_dat_button.pack(side="left", padx=5)
+        # Category combo
+        category_layout = QHBoxLayout()
+        category_layout.addWidget(QLabel("Category:"))
+        self.category_combo = QComboBox()
+        self.category_combo.addItems(["Item", "Outfit", "Effect", "Missile"])
+        self.category_combo.currentTextChanged.connect(self.on_category_change)
+        category_layout.addWidget(self.category_combo)
+        category_layout.addStretch()
+        main_layout.addLayout(category_layout)
         
-        self.file_label = ctk.CTkLabel(
-            self.top_frame, 
-            text="No file loaded.",
-            text_color="gray"
-        )
-        self.file_label.pack(side="left", padx=10, expand=True, fill="x")
+        # Main horizontal layout - lists on sides, content in middle
+        main_h_layout = QHBoxLayout()
         
+        # Left: ID list
+        self.ids_list_frame = ScrollableFrame(self, "List ID")
+        self.ids_list_frame.setMinimumWidth(200)
+        self.ids_list_frame.setMaximumWidth(250)
+        main_h_layout.addWidget(self.ids_list_frame)
         
-        self.chk_extended = ctk.CTkCheckBox(self.top_frame, text="Extended")
-        self.chk_extended.pack(side="left", padx=5)
-        self.chk_extended.select() #init extended true
-
-        self.chk_transparency = ctk.CTkCheckBox(self.top_frame, text="Transparency")
-        self.chk_transparency.pack(side="left", padx=5)        
-                
-        self.id_frame = ctk.CTkFrame(self, border_width=1, border_color="gray30")        
-        self.id_frame.pack(padx=10, pady=(0,1), fill="x")
+        # Middle: Main content area
+        middle_widget = QWidget()
+        middle_layout = QVBoxLayout(middle_widget)
+        middle_layout.setContentsMargins(0, 0, 0, 0)
         
-        ctk.CTkLabel(self.id_frame, text="ID: (Ex: 100, 105-110):").pack(side="left", padx=5)
+        # ID entry frame
+        id_frame = QHBoxLayout()
+        id_frame.addWidget(QLabel("ID: (Ex: 100, 105-110):"))
+        self.id_entry = QLineEdit()
+        self.id_entry.setPlaceholderText("Enter the item IDs here")
+        self.id_entry.returnPressed.connect(self.load_ids_from_entry)
+        id_frame.addWidget(self.id_entry, 1)
         
-        self.id_entry = ctk.CTkEntry(
-            self.id_frame, 
-            placeholder_text="Enter the item IDs here"
-
-        )    
-        self.id_entry.pack(side="left", padx=10,pady=1, expand=True, fill="x")
-        self.id_entry.bind("<Return>", lambda event: self.load_ids_from_entry())
+        self.load_ids_button = QPushButton("Search ID")
+        self.load_ids_button.clicked.connect(self.load_ids_from_entry)
+        id_frame.addWidget(self.load_ids_button)
+        middle_layout.addLayout(id_frame)
         
-        self.load_ids_button = ctk.CTkButton(
-            self.id_frame, 
-            text="Search ID", 
-            command=self.load_ids_from_entry, 
-            width=100
-        )
-        self.load_ids_button.pack(side="left", padx=5)
+        main_grid = QGridLayout()
+        main_grid.setColumnStretch(0, 1)
+        main_grid.setColumnStretch(1, 1)
 
-
-        self.main_layout = ctk.CTkFrame(self)
-        self.main_layout.pack(padx=10, pady=5, fill="both", expand=True)
-
-
-        self.main_layout.grid_columnconfigure(0, minsize=340, weight=0)
-        self.main_layout.grid_columnconfigure(1, minsize=200, weight=1)
-
-        self.main_layout.grid_rowconfigure(0, weight=1)
-        self.main_layout.grid_rowconfigure(1, weight=0)
-
-
-        self.attributes_frame = ctk.CTkScrollableFrame(
-            self.main_layout,
-            label_text="Flags",
-            border_width=1,
-            border_color="gray30"
-        )
-        self.attributes_frame.grid(row=0, column=0, padx=10, pady=5, sticky="nsew")
-
+        self.attributes_frame = ScrollableFrame(self, "Flags")
+        main_grid.addWidget(self.attributes_frame, 0, 0)
+        
         #Internal Flags/hide user
         INTERNAL_FLAGS = [
             "MarketItem", 
         ]
 
-
         all_attr_names = sorted(REVERSE_METADATA_FLAGS.keys())
         
         visible_attr_names = [name for name in all_attr_names if name not in INTERNAL_FLAGS]
 
-
         num_attrs = len(visible_attr_names)
         items_per_col = (num_attrs + 1) // 2 
 
+        flags_layout = QGridLayout()
+        flags_layout.setColumnStretch(0, 1)
+        flags_layout.setColumnStretch(1, 1)
+        
         for i, attr_name in enumerate(visible_attr_names):
             row = i % items_per_col
             col = i // items_per_col
             
-            cb = ctk.CTkCheckBox(self.attributes_frame, text=attr_name)
-            cb.grid(row=row, column=col, padx=10, pady=5, sticky="w")
+            cb = QCheckBox(attr_name)
+            flags_layout.addWidget(cb, row, col)
             
             self.checkboxes[attr_name] = cb
+        
+        self.attributes_frame.scroll_layout.addLayout(flags_layout)
+        self.attributes_frame.scroll_layout.addStretch()
 
-        self.direction_frame = ctk.CTkScrollableFrame(
-            self.main_layout,
-            label_text="Direction",
-            border_width=1,
-            border_color="gray30"
-        )
-        self.direction_frame.grid(row=0, column=1, rowspan=2,  padx=10, pady=5, sticky="nsew")
-
-        self.numeric_attrs_frame = ctk.CTkScrollableFrame(
-            self.main_layout,
-            label_text="Properties", 
-            border_width=1,
-            border_color="gray30"
-        )
-        self.numeric_attrs_frame.grid(row=1, column=0, padx=10, pady=(0,5), sticky="nsew")
-
+        self.direction_frame = ScrollableFrame(self, "Direction")
+        main_grid.addWidget(self.direction_frame, 0, 1, 2, 1)
+        
+        self.numeric_attrs_frame = ScrollableFrame(self, "Properties")
+        main_grid.addWidget(self.numeric_attrs_frame, 1, 0)
+        
         self.numeric_entries = {}
         self.numeric_previews = {}
 
@@ -771,134 +826,222 @@ class DatSprTab(ctk.CTkFrame):
             ("Anim (Frames):", "Animation", False, None),
         ]
 
+        props_layout = QGridLayout()
         row = 0
         for label_text, attr_name, has_preview, preview_type in attrs_config:
-            ctk.CTkLabel(
-                self.numeric_attrs_frame, 
-                text=label_text, 
-                width=120, 
-                anchor="w"
-            ).grid(row=row, column=0, padx=5, pady=3, sticky="w")
+            props_layout.addWidget(QLabel(label_text), row, 0)
             
-            entry = ctk.CTkEntry(self.numeric_attrs_frame, width=80)
-            entry.grid(row=row, column=1, padx=5, pady=3)
+            entry = QLineEdit()
+            entry.setMaximumWidth(80)
+            props_layout.addWidget(entry, row, 1)
             self.numeric_entries[attr_name] = entry
             
             if has_preview and preview_type == "color":
-                preview = ctk.CTkLabel(
-                    self.numeric_attrs_frame, 
-                    text="   ", 
-                    width=40, 
-                    fg_color="black"
-                )
-                preview.grid(row=row, column=2, padx=5, pady=3)
+                preview = QLabel("   ")
+                preview.setMinimumWidth(40)
+                preview.setMaximumWidth(40)
+                preview.setStyleSheet("background-color: black; border: 1px solid gray;")
+                props_layout.addWidget(preview, row, 2)
                 self.numeric_previews[attr_name] = preview
-                entry.bind(
-                    "<KeyRelease>", 
-                    lambda e, attr=attr_name: self.update_color_preview(attr)
-                )
+                entry.textChanged.connect(lambda text, attr=attr_name: self.update_color_preview(attr))
             
             row += 1
+        
+        self.numeric_attrs_frame.scroll_layout.addLayout(props_layout)
+        self.numeric_attrs_frame.scroll_layout.addStretch()
+        
+        middle_layout.addLayout(main_grid)
+        main_h_layout.addWidget(middle_widget, 1)
+        
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
 
-
-        self.preview_frame = ctk.CTkFrame(self, border_width=1, border_color="gray30")
-        self.preview_frame.pack(side="right", padx=10, pady=10, fill="both", expand=False)
+        self.preview_frame = QFrame()
+        self.preview_frame.setFrameShape(QFrame.Shape.Box)
+        preview_layout = QVBoxLayout(self.preview_frame)
+        preview_layout.setContentsMargins(6, 6, 6, 6)
         
-        ctk.CTkLabel(self.preview_frame, text="Preview").pack(pady=(6,0))
+        preview_label = QLabel("Preview")
+        preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview_layout.addWidget(preview_label)
         
-        
-        self.image_label = ctk.CTkLabel(
-            self.preview_frame, 
-            text="",          
-            width=150,         
-            height=150,
-            fg_color="#222121",  
-            text_color="white",   
-            corner_radius=6
-        )
-        self.image_label.pack(padx=6, pady=6)
-        self.image_label.bind("<Double-Button-1>", self.on_preview_click)
+        self.image_label = DroppablePreviewLabel() 
+        self.image_label.setMinimumSize(150, 150)
+        self.image_label.setMaximumSize(150, 150)
+        self.image_label.setStyleSheet("background-color: #222121; border: 1px solid gray;")
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setText("No sprite")
+        self.image_label.doubleClicked.connect(self.on_preview_click)
+        self.image_label.spriteDropped.connect(self.handle_preview_drop)    
+        preview_layout.addWidget(self.image_label)
      
-    
-        self.prev_controls = ctk.CTkFrame(self.preview_frame)
-        self.prev_controls.pack(padx=6, pady=2, fill="x")
+        prev_controls = QHBoxLayout()
+        self.prev_index_label = QLabel("Sprite 0 / 0")
+        prev_controls.addWidget(self.prev_index_label)
         
-        self.prev_index_label = ctk.CTkLabel(self.prev_controls, text="Sprite 0 / 0")
-        self.prev_index_label.pack(side="left", padx=4)
-        
-        self.prev_prev_btn = ctk.CTkButton(
-            self.prev_controls, 
-            text="<", 
-            width=30, 
-            command=lambda: self.change_preview_index(-1)
-        )
-        self.prev_prev_btn.pack(side="left", padx=4)
+        self.prev_prev_btn = QPushButton("<")
+        self.prev_prev_btn.setMaximumWidth(30)
+        self.prev_prev_btn.clicked.connect(lambda: self.change_preview_index(-1))
+        prev_controls.addWidget(self.prev_prev_btn)
               
-        self.prev_next_btn = ctk.CTkButton(
-            self.prev_controls, 
-            text=">", 
-            width=30, 
-            command=lambda: self.change_preview_index(1)
-        )
-        self.prev_next_btn.pack(side="left", padx=4)
+        self.prev_next_btn = QPushButton(">")
+        self.prev_next_btn.setMaximumWidth(30)
+        self.prev_next_btn.clicked.connect(lambda: self.change_preview_index(1))
+        prev_controls.addWidget(self.prev_next_btn)
         
-        self.anim_btn = ctk.CTkButton(
-            self.prev_controls,
-            text="▶",
-            width=30,
-            fg_color="#444444",
-            command=self.toggle_animation
-        )
-        self.anim_btn.pack(side="left", padx=4)        
+        self.anim_btn = QPushButton("▶")
+        self.anim_btn.setMaximumWidth(30)
+        self.anim_btn.setStyleSheet("background-color: #444444;")
+        self.anim_btn.clicked.connect(self.toggle_animation)
+        prev_controls.addWidget(self.anim_btn)
         
-        self.preview_info = ctk.CTkLabel(
-            self.preview_frame, 
-            text="No sprite loaded.",
-            wraplength=250, 
-            justify="left"
-        )
-        self.preview_info.pack(padx=6, pady=(0,6))
+        preview_layout.addLayout(prev_controls)
+        
+        self.preview_info = QLabel("No sprite loaded.")
+        self.preview_info.setWordWrap(True)
+        preview_layout.addWidget(self.preview_info)
+        
+        right_layout.addWidget(self.preview_frame)
+        
 
-        self.bottom_frame = ctk.CTkFrame(self)
-        self.bottom_frame.pack(padx=5, pady=5, fill="x")
-
-        self.apply_button = ctk.CTkButton(
-            self.bottom_frame, 
-            text="Save flags",
-            width=15,             
-            command=self.apply_changes
-        )
-        self.apply_button.pack(side="left", padx=5, pady=5) 
+        self.sprite_list_frame = ScrollableFrame(self, "List Sprites")
+        self.sprite_list_frame.setMinimumWidth(200)
+        self.sprite_list_frame.setMaximumWidth(250)
+        right_layout.addWidget(self.sprite_list_frame)
         
-        self.save_button = ctk.CTkButton(
-            self.bottom_frame, 
-            text="Sprite Optimizer (Clean)", 
-        )
-        self.save_button.pack(side="left", padx=5, pady=5)             
-
-        self.save_button = ctk.CTkButton(
-            self.bottom_frame, 
-            text="Compile as...", 
-            width=25,  
-            fg_color="#7373ff",              
-            command=self.save_dat_file
-        )
-        self.save_button.pack(side="left", padx=5, pady=5) 
+        main_h_layout.addWidget(right_widget)
+        main_layout.addLayout(main_h_layout)
         
-        self.status_label = ctk.CTkLabel(
-            self.bottom_frame, 
-            text="", 
-            anchor="w"
-        )             
-        self.status_label.pack(side="left", padx=7, pady=10, expand=True, fill="x") 
+        bottom_frame = QHBoxLayout()
+        
+        id_operations_frame = QHBoxLayout()
+        id_operations_frame.addWidget(QLabel("Manage IDs:"))
+        
+        self.id_operation_entry = QLineEdit()
+        self.id_operation_entry.setPlaceholderText("ID (ex: 100-105)")
+        self.id_operation_entry.setMaximumWidth(120)
+        id_operations_frame.addWidget(self.id_operation_entry)
+
+        self.insert_id_button = QPushButton("Insert ID")
+        self.insert_id_button.setStyleSheet("background-color: #00b300;")
+        self.insert_id_button.clicked.connect(self.insert_ids)
+        id_operations_frame.addWidget(self.insert_id_button)
+
+        self.delete_id_button = QPushButton("Delete ID")
+        self.delete_id_button.setStyleSheet("background-color: #ff2626;")
+        self.delete_id_button.clicked.connect(self.delete_ids)
+        id_operations_frame.addWidget(self.delete_id_button)
+        
+        bottom_frame.addLayout(id_operations_frame)
+        
+        self.apply_button = QPushButton("Save flags")
+        self.apply_button.clicked.connect(self.apply_changes)
+        bottom_frame.addWidget(self.apply_button)
+        
+        self.save_button = QPushButton("Compile as...")
+        self.save_button.setStyleSheet("background-color: #00008c;")
+        self.save_button.clicked.connect(self.save_dat_file)
+        bottom_frame.addWidget(self.save_button)
+        
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("color: white;")
+        bottom_frame.addWidget(self.status_label, 1)
+        
+        main_layout.addLayout(bottom_frame)
+        
         self.disable_editing()
-              
-        self.context_menu = Menu(self, tearoff=0)
-        self.context_menu.add_command(label="Import", command=self.on_context_import)
-        self.context_menu.add_command(label="Export", command=self.on_context_export)
-        self.context_menu.add_command(label="Replace", command=self.on_context_replace)
-        self.context_menu.add_command(label="Clear", command=self.on_context_delete)
+        
+        # Context menu
+        self.context_menu = QMenu(self)
+        self.context_menu.addAction("Import", self.on_context_import)
+        self.context_menu.addAction("Export", self.on_context_export)
+        self.context_menu.addAction("Replace", self.on_context_replace)
+        self.context_menu.addAction("Clear", self.on_context_delete)
         self.right_click_target = None
+        
+        self.id_buttons = {}
+        self.ids_per_page = 250
+        self.current_page = 0
+        
+        
+    def handle_preview_drop(self, new_sprite_id, drop_pos):
+        if not self.current_ids or not self.editor:
+            return
+
+        cat_map = {"Item": "items", "Outfit": "outfits", "Effect": "effects", "Missile": "missiles"}
+        current_cat_key = cat_map.get(self.category_combo.currentText(), "items")
+        target_id = self.current_ids[0]
+        
+        if target_id not in self.editor.things[current_cat_key]:
+            return
+
+        item_data = self.editor.things[current_cat_key][target_id]
+        props = item_data.get('props', {})
+        
+        width = props.get('Width', 1)
+        height = props.get('Height', 1)
+        
+        width = 1 if not width else width
+        height = 1 if not height else height
+
+        pixmap = self.image_label.pixmap()
+        if not pixmap:
+            return
+
+        pm_w = pixmap.width()
+        pm_h = pixmap.height()
+        label_w = self.image_label.width()
+        label_h = self.image_label.height()
+
+        offset_x = (label_w - pm_w) // 2
+        offset_y = (label_h - pm_h) // 2
+
+        click_x = drop_pos.x() - offset_x
+        click_y = drop_pos.y() - offset_y
+
+        if click_x < 0 or click_x >= pm_w or click_y < 0 or click_y >= pm_h:
+            return
+
+        sprite_size = 32 
+        col = int(click_x / sprite_size)
+        row = int(click_y / sprite_size)
+
+        if col >= width: col = width - 1
+        if row >= height: row = height - 1
+        
+        inverted_row = (height - 1) - row
+
+        inverted_col = (width - 1) - col
+
+        target_row = inverted_row
+        target_col = inverted_col
+        
+        sprites_per_frame = width * height * props.get('Layers', 1)
+        base_frame_index = self.current_preview_index * sprites_per_frame
+        
+        local_index = (target_row * width) + target_col
+        final_index = base_frame_index + local_index
+        
+        current_sprites = self.current_preview_sprite_list
+        if not current_sprites:
+
+            current_sprites = [0] * (final_index + 1)
+
+        if 0 <= final_index < len(current_sprites):
+            current_sprites[final_index] = new_sprite_id
+            
+            original_bytes = item_data['texture_bytes']
+            new_texture_bytes = self.rebuild_texture_bytes(original_bytes, current_sprites)
+            self.editor.things[current_cat_key][target_id]['texture_bytes'] = new_texture_bytes
+            
+            self.status_label.setText(f"Sprite na posição [{col},{row}] alterado para ID {new_sprite_id}.")
+
+            self.prepare_preview_for_current_ids(current_cat_key)
+            self.show_preview_at_index(self.current_preview_index)
+        else:
+            print(f"DEBUG: Índice calculado {final_index} fora do range {len(current_sprites)}")
+
         
          
     def toggle_animation(self):
@@ -908,18 +1051,21 @@ class DatSprTab(ctk.CTkFrame):
         self.is_animating = not self.is_animating
 
         if self.is_animating:
-            self.anim_btn.configure(text="⏹", fg_color="#ff5555") 
+            self.anim_btn.setText("⏹")
+            self.anim_btn.setStyleSheet("background-color: #ff5555;")
             self.animate_loop()
         else:
-            self.anim_btn.configure(text="▶", fg_color="#444444") 
-            if self.anim_job:
-                self.after_cancel(self.anim_job)
-                self.anim_job = None
+            self.anim_btn.setText("▶")
+            self.anim_btn.setStyleSheet("background-color: #444444;")
+            if self.anim_timer:
+                self.anim_timer.stop()
+                self.anim_timer = None
 
     def animate_loop(self):
         if not self.is_animating or not self.current_preview_sprite_list:
             self.is_animating = False
-            self.anim_btn.configure(text="▶", fg_color="#444444")
+            self.anim_btn.setText("▶")
+            self.anim_btn.setStyleSheet("background-color: #444444;")
             return
 
         group_size = self.current_item_width * self.current_item_height * self.current_item_layers
@@ -936,97 +1082,12 @@ class DatSprTab(ctk.CTkFrame):
             
         self.show_preview_at_index(next_index)
         
-        self.anim_job = self.after(100, self.animate_loop)        
+        self.anim_timer = QTimer()
+        self.anim_timer.timeout.connect(self.animate_loop)
+        self.anim_timer.setSingleShot(True)
+        self.anim_timer.start(100)
         
-        
-    def on_drag_start(self, event, sprite_id):
-        self.dragged_sprite_id = sprite_id
-
-        self.configure(cursor="hand2") 
-
-    def on_drag_end(self, event):
-        self.configure(cursor="")
-        
-        if self.dragged_sprite_id is None:
-            return
-
-        x_root, y_root = self.winfo_pointerxy()
-        
-        lbl_x = self.image_label.winfo_rootx()
-        lbl_y = self.image_label.winfo_rooty()
-        lbl_w = self.image_label.winfo_width()
-        lbl_h = self.image_label.winfo_height()
-
-        if (lbl_x <= x_root <= lbl_x + lbl_w) and (lbl_y <= y_root <= lbl_y + lbl_h):
-            
-            if not self.editor or not self.current_ids:
-                return
-
-            target_id = self.current_ids[0]
-            cat_map = {"Item": "items", "Outfit": "outfits", "Effect": "effects", "Missile": "missiles"}
-            cat = cat_map.get(self.category_var.get(), "items")
-            
-            if target_id in self.editor.things[cat]:
-                props = self.editor.things[cat][target_id]['props']
-                
-                width_sprites = props.get('Width', 1)
-                height_sprites = props.get('Height', 1)
-                
-                rel_x = x_root - lbl_x
-                rel_y = y_root - lbl_y
-                
-                cell_w = lbl_w / width_sprites
-                cell_h = lbl_h / height_sprites
-                
-                grid_x = int(rel_x // cell_w)
-                grid_y = int(rel_y // cell_h)
-                
-                grid_x = max(0, min(grid_x, width_sprites - 1))
-                grid_y = max(0, min(grid_y, height_sprites - 1))
-                inverted_y = height_sprites - 1 - grid_y
-                
-                inverted_x = width_sprites - 1 - grid_x 
-                
-                clicked_index = (inverted_y * width_sprites) + inverted_x             
-                sprites_per_frame = width_sprites * height_sprites
-                final_index = (self.current_preview_index * sprites_per_frame) + clicked_index
-                
-                self.on_drop_success(self.dragged_sprite_id, final_index)
-
-        self.dragged_sprite_id = None
-
-    def on_drop_success(self, sprite_id, target_index):
-        if not self.editor or not self.current_ids:
-            return
-            
-        target_item_id = self.current_ids[0]
-        cat_map = {"Item": "items", "Outfit": "outfits", "Effect": "effects", "Missile": "missiles"}
-        category = cat_map.get(self.category_var.get(), "items")
-        
-        thing = self.editor.things[category].get(target_item_id)
-        if not thing: return
-
-        current_sprites = DatEditor.extract_sprite_ids_from_texture_bytes(thing['texture_bytes'])
-
-        if not current_sprites:
-            current_sprites = [0] * (target_index + 1)
-        
-        if target_index >= len(current_sprites):
-            extension = [0] * (target_index - len(current_sprites) + 1)
-            current_sprites.extend(extension)
-
-        print(f"Alterando Sprite no Indice Global {target_index} para ID {sprite_id}")
-        current_sprites[target_index] = sprite_id
-        
-        try:
-            new_bytes = self.rebuild_texture_bytes(thing['texture_bytes'], current_sprites)
-            thing['texture_bytes'] = new_bytes
-            
-            self.load_single_id(target_item_id)
-            
-        except Exception as e:
-            messagebox.showerror("Erro", f"Erro ao atualizar sprite: {e}")
-
+  
            
     def rebuild_texture_bytes(self, original_bytes, new_sprite_ids):
         if not original_bytes:
@@ -1060,16 +1121,15 @@ class DatSprTab(ctk.CTkFrame):
             ids_data.extend(struct.pack(fmt, int(sid)))
             
         return header + ids_data
-            
-
-
-              
+                        
     def show_context_menu(self, event, item_id, context_type):
         self.right_click_target = {"id": item_id, "type": context_type}
-        try:
-            self.context_menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            self.context_menu.grab_release()
+        if isinstance(event, QContextMenuEvent):
+            self.context_menu.exec(event.globalPos())
+        elif hasattr(event, 'globalPos'):
+            self.context_menu.exec(event.globalPos())
+        else:
+            self.context_menu.exec(QPoint(event.x(), event.y()))
 
     def on_context_export(self):
         if not self.right_click_target:
@@ -1088,7 +1148,7 @@ class DatSprTab(ctk.CTkFrame):
             
             elif target_type == "id_list":
                 cat_map = {"Item": "items", "Outfit": "outfits", "Effect": "effects", "Missile": "missiles"}
-                current_cat_key = cat_map.get(self.category_var.get(), "items")
+                current_cat_key = cat_map.get(self.category_combo.currentText(), "items")
                 
                 if self.editor and target_id in self.editor.things[current_cat_key]:
                     item = self.editor.things[current_cat_key][target_id]
@@ -1098,20 +1158,20 @@ class DatSprTab(ctk.CTkFrame):
                         default_name = f"{current_cat_key}_{target_id}.png"
 
             if img_to_save:
-                save_path = filedialog.asksaveasfilename(
-                    defaultextension=".png",
-                    filetypes=[("PNG Image", "*.png")],
-                    initialfile=default_name,
-                    title="Export Image"
+                save_path, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "Export Image",
+                    default_name,
+                    "PNG Image (*.png)"
                 )
                 if save_path:
                     img_to_save.save(save_path)
-                    messagebox.showinfo("Export", f"Saved to {save_path}")
+                    QMessageBox.information(self, "Export", f"Saved to {save_path}")
             else:
-                messagebox.showwarning("Export", "No image data found for this ID.")
+                QMessageBox.warning(self, "Export", "No image data found for this ID.")
 
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to export: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to export: {e}")
             
             
     def on_context_delete(self):
@@ -1121,11 +1181,13 @@ class DatSprTab(ctk.CTkFrame):
         target_id = self.right_click_target["id"]
         target_type = self.right_click_target["type"]
 
-        confirm = messagebox.askyesno(
+        reply = QMessageBox.question(
+            self,
             "Confirm Clear",
-            f"Are you sure you want to clear {target_type} ID {target_id}?\nThis action cannot be undone."
+            f"Are you sure you want to clear {target_type} ID {target_id}?\nThis action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        if not confirm:
+        if reply != QMessageBox.StandardButton.Yes:
             return
 
         if target_type == "id_list":
@@ -1133,7 +1195,7 @@ class DatSprTab(ctk.CTkFrame):
                 return
 
             cat_map = {"Item": "items", "Outfit": "outfits", "Effect": "effects", "Missile": "missiles"}
-            current_cat_key = cat_map.get(self.category_var.get(), "items")
+            current_cat_key = cat_map.get(self.category_combo.currentText(), "items")
 
             if target_id in self.editor.things[current_cat_key]:
                 minimal_texture = b'\x01\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00'
@@ -1145,20 +1207,23 @@ class DatSprTab(ctk.CTkFrame):
                 
                 self.refresh_id_list() 
                 self.load_single_id(target_id)
-                self.status_label.configure(text=f"ID {target_id} cleared successfully.", text_color="green")
+                self.status_label.setText(f"ID {target_id} cleared successfully.")
+                self.status_label.setStyleSheet("color: green;")
 
         elif target_type == "sprite_list":
-            messagebox.showinfo("Not Implemented", "Sprite clearing requires SPR write logic.\nImplement 'replace_sprite' first.")
+            QMessageBox.information(self, "Not Implemented", "Sprite clearing requires SPR write logic.\nImplement 'replace_sprite' first.")
             
 
     def on_context_import(self):
         if not self.spr:
-            messagebox.showwarning("Aviso", "Nenhum arquivo .spr carregado.")
+            QMessageBox.warning(self, "Aviso", "Nenhum arquivo .spr carregado.")
             return
 
-        file_path = filedialog.askopenfilename(
-            title="Importar Sprite",
-            filetypes=[("Imagens", "*.png *.bmp")]
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Importar Sprite",
+            "",
+            "Imagens (*.png *.bmp)"
         )
         
         if not file_path:
@@ -1168,11 +1233,12 @@ class DatSprTab(ctk.CTkFrame):
             new_image = Image.open(file_path)         
             new_id = self.spr.sprite_count + 1            
             self.spr.replace_sprite(new_id, new_image)           
-            self.status_label.configure(text=f"Sprite {new_id} importado com sucesso.", text_color="green")           
+            self.status_label.setText(f"Sprite {new_id} importado com sucesso.")
+            self.status_label.setStyleSheet("color: green;")           
             self.select_sprite(new_id)
 
         except Exception as e:
-            messagebox.showerror("Erro", f"Falha ao importar sprite: {e}")
+            QMessageBox.critical(self, "Erro", f"Falha ao importar sprite: {e}")
 
         self.hide_loading()
         
@@ -1184,12 +1250,14 @@ class DatSprTab(ctk.CTkFrame):
         target_type = self.right_click_target["type"]
         
         if target_type != "sprite_list":
-            messagebox.showinfo("Info", "Replace is currently only supported for Sprite List direct editing.")
+            QMessageBox.information(self, "Info", "Replace is currently only supported for Sprite List direct editing.")
             return
 
-        file_path = filedialog.askopenfilename(
-            title="Select Image",
-            filetypes=[("Image Files", "*.png *.bmp")]
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Image",
+            "",
+            "Image Files (*.png *.bmp)"
         )
         
         if not file_path:
@@ -1201,29 +1269,29 @@ class DatSprTab(ctk.CTkFrame):
             self.spr.replace_sprite(target_id, new_image)
             
             self.refresh_sprite_list()
-            self.status_label.configure(text=f"Sprite {target_id} replaced successfully.", text_color="green")
+            self.status_label.setText(f"Sprite {target_id} replaced successfully.")
+            self.status_label.setStyleSheet("color: green;")
             
             if self.selected_sprite_id == target_id:
                 self.show_preview_at_index(self.current_preview_index)
 
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to replace sprite: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to replace sprite: {e}")
             
         self.hide_loading()
         
     def on_category_change(self, choice):
-        self.category_var.set(choice)        
         self.current_page = 0
-        self.id_entry.delete(0, "end") 
+        self.id_entry.clear()
         self.refresh_id_list()
         
 
     def insert_ids(self):
         if not self.editor:
-            messagebox.showwarning("Warning", "Load a .dat file first.")
+            QMessageBox.warning(self, "Warning", "Load a .dat file first.")
             return
         
-        id_string = self.id_operation_entry.get().strip()
+        id_string = self.id_operation_entry.text().strip()
         ids_to_insert = []
 
 
@@ -1235,11 +1303,10 @@ class DatSprTab(ctk.CTkFrame):
             ids_to_insert = self.parse_ids(id_string)
         
         if not ids_to_insert:
-            messagebox.showerror("Error", "Invalid ID format.")
+            QMessageBox.critical(self, "Error", "Invalid ID format.")
 
             return
         
-
         inserted_count = 0
         for new_id in ids_to_insert:
             if new_id in self.editor.things['items']:
@@ -1267,12 +1334,10 @@ class DatSprTab(ctk.CTkFrame):
                 self.editor.counts['items'] = new_id
         
         if inserted_count > 0:
-            self.status_label.configure(
-                text=f"{inserted_count} ID(s) successfully inserted.",
-                text_color="green"
-            )
+            self.status_label.setText(f"{inserted_count} ID(s) successfully inserted.")
+            self.status_label.setStyleSheet("color: green;")
             self.refresh_id_list()
-            self.id_operation_entry.delete(0, "end")
+            self.id_operation_entry.clear()
             
 
             if len(ids_to_insert) == 1:
@@ -1283,17 +1348,15 @@ class DatSprTab(ctk.CTkFrame):
                     self.current_page = target_page
                     self.refresh_id_list()
         else:
-            self.status_label.configure(
-                text="No new IDs were inserted (they already exist).",
-                text_color="yellow"
-            )
+            self.status_label.setText("No new IDs were inserted (they already exist).")
+            self.status_label.setStyleSheet("color: yellow;")
 
     def delete_ids(self):
         if not self.editor:
-            messagebox.showwarning("Warning", "Load a .dat file first.")
+            QMessageBox.warning(self, "Warning", "Load a .dat file first.")
             return
 
-        id_string = self.id_operation_entry.get().strip()
+        id_string = self.id_operation_entry.text().strip()
         ids_to_delete = []
 
         if not id_string:
@@ -1310,15 +1373,17 @@ class DatSprTab(ctk.CTkFrame):
         if not ids_to_delete:
             return
 
-        confirm = messagebox.askyesno(
+        reply = QMessageBox.question(
+            self,
             "Confirm Deletion",
             f"This will modify {len(ids_to_delete)} items.\n"
             "IDs in the middle of the list will be cleared.\n"
             "IDs at the end of the list will be removed.\n"
-            "Do you want to continue?"
+            "Do you want to continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
-        if not confirm:
+        if reply != QMessageBox.StandardButton.Yes:
             return
 
         ids_to_delete.sort(reverse=True)
@@ -1355,15 +1420,13 @@ class DatSprTab(ctk.CTkFrame):
         if deleted_count > 0:
             status_message += f"{deleted_count} IDs at the end of the list were removed."
             
-        self.status_label.configure(
-            text=status_message,
-            text_color="orange"
-        )
+        self.status_label.setText(status_message)
+        self.status_label.setStyleSheet("color: orange;")
 
         self.current_ids = []
         self.refresh_id_list()
-        self.id_operation_entry.delete(0, "end")
-        self.id_entry.delete(0, "end")
+        self.id_operation_entry.clear()
+        self.id_entry.clear()
         self.clear_preview()
 
 
@@ -1375,9 +1438,9 @@ class DatSprTab(ctk.CTkFrame):
             return
         
         try:
-            val = entry.get().strip()
+            val = entry.text().strip()
             if not val:
-                preview.configure(fg_color="black")
+                preview.setStyleSheet("background-color: black; border: 1px solid gray;")
                 return
                 
             idx = int(val)
@@ -1386,18 +1449,18 @@ class DatSprTab(ctk.CTkFrame):
 
                 if 0 <= idx <= 215:
                     r, g, b = ob_index_to_rgb(idx)
-                    preview.configure(fg_color=f"#{r:02x}{g:02x}{b:02x}")
+                    preview.setStyleSheet(f"background-color: rgb({r}, {g}, {b}); border: 1px solid gray;")
                 else:
-                    preview.configure(fg_color="red")
+                    preview.setStyleSheet("background-color: red; border: 1px solid gray;")
             elif attr_name == "HasLight_Color":
 
                 if 0 <= idx <= 65535:
                     r, g, b = self.light_color_to_rgb(idx)
-                    preview.configure(fg_color=f"#{r:02x}{g:02x}{b:02x}")
+                    preview.setStyleSheet(f"background-color: rgb({r}, {g}, {b}); border: 1px solid gray;")
                 else:
-                    preview.configure(fg_color="red")
+                    preview.setStyleSheet("background-color: red; border: 1px solid gray;")
         except ValueError:
-            preview.configure(fg_color="gray")
+            preview.setStyleSheet("background-color: gray; border: 1px solid gray;")
 
     def light_color_to_rgb(self, color_val):
         r = ((color_val & 0x1F) << 3)
@@ -1415,8 +1478,11 @@ class DatSprTab(ctk.CTkFrame):
         self.refresh_id_list()            
         
     def refresh_id_list(self):
-        for widget in self.ids_list_frame.winfo_children():
-            widget.destroy()
+
+        while self.ids_list_frame.scroll_layout.count():
+            item = self.ids_list_frame.scroll_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
 
         self.id_buttons.clear()
         
@@ -1426,7 +1492,7 @@ class DatSprTab(ctk.CTkFrame):
         self.show_loading("Loading...\nPlease wait.")            
 
         cat_map = {"Item": "items", "Outfit": "outfits", "Effect": "effects", "Missile": "missiles"}
-        current_cat_key = cat_map.get(self.category_var.get(), "items")
+        current_cat_key = cat_map.get(self.category_combo.currentText(), "items")
         
         start_id_offset = 100 if current_cat_key == "items" else 1
         
@@ -1441,11 +1507,16 @@ class DatSprTab(ctk.CTkFrame):
 
         for item_id in range(current_start_id, end_id):
 
-            item_frame = ctk.CTkFrame(self.ids_list_frame, fg_color="transparent")
-            item_frame.pack(pady=1, fill="x")
+            item_frame = QFrame()
+            item_frame.setFrameShape(QFrame.Shape.NoFrame)
+            item_layout = QHBoxLayout(item_frame)
+            item_layout.setContentsMargins(2, 1, 2, 1)
             
-            sprite_label = ctk.CTkLabel(item_frame, text="", width=80, height=80, fg_color="#222121")
-            sprite_label.pack(side="left", padx=(2, 5))
+            sprite_label = ClickableLabel()
+            sprite_label.setMinimumSize(80, 80)
+            sprite_label.setMaximumSize(80, 80)
+            sprite_label.setStyleSheet("background-color: #222121; border: 1px solid gray;")
+            sprite_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             
             if self.spr and item_id in self.editor.things[current_cat_key]:
                 item = self.editor.things[current_cat_key][item_id]
@@ -1455,47 +1526,61 @@ class DatSprTab(ctk.CTkFrame):
                     try:
                         img = self.spr.get_sprite(sprite_ids[0])
                         if img:
-                            img_resized = img.resize((32, 32), Image.NEAREST)
-                            tk_img = ctk.CTkImage(light_image=img_resized, dark_image=img_resized, size=(72, 72))
-                            sprite_label.configure(image=tk_img, text="")
-                            sprite_label.image = tk_img 
+                            img_resized = img.resize((72, 72), Image.NEAREST)
+                            pixmap = pil_to_qpixmap(img_resized)
+                            sprite_label.setPixmap(pixmap.scaled(72, 72, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
                     except Exception as e:
                         print(f"Erro sprite {item_id}: {e}")
             
-            id_label = ctk.CTkLabel(
-                item_frame,
-                text=str(item_id),
-                fg_color=(("gray15", "gray25")),
-                width=80,
-                anchor="w"
-            )
-            id_label.pack(side="left", fill="x", expand=True)
+            item_layout.addWidget(sprite_label)
             
-            item_frame.bind("<Double-Button-1>", lambda e, iid=item_id: self.load_single_id(iid))
-            sprite_label.bind("<Double-Button-1>", lambda e, iid=item_id: self.load_single_id(iid))
-            id_label.bind("<Double-Button-1>", lambda e, iid=item_id: self.load_single_id(iid))
+            id_label = ClickableLabel(str(item_id))
+            id_label.setStyleSheet("background-color: gray15; padding: 5px;")
+            id_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            item_layout.addWidget(id_label, 1)
             
-            item_frame.bind("<Button-3>", lambda e, iid=item_id: self.show_context_menu(e, iid, "id_list"))
-            sprite_label.bind("<Button-3>", lambda e, iid=item_id: self.show_context_menu(e, iid, "id_list"))
-            id_label.bind("<Button-3>", lambda e, iid=item_id: self.show_context_menu(e, iid, "id_list"))
+            def make_load_handler(iid):
+                return lambda: self.load_single_id(iid)
+            
+            def make_context_handler(iid):
+                return lambda pos: self.show_context_menu(pos, iid, "id_list")
+            
+            sprite_label.doubleClicked.connect(make_load_handler(item_id))
+            id_label.doubleClicked.connect(make_load_handler(item_id))
+            
+            sprite_label.rightClicked.connect(make_context_handler(item_id))
+            id_label.rightClicked.connect(make_context_handler(item_id))
                 
             self.id_buttons[item_id] = id_label
+            self.ids_list_frame.scroll_layout.addWidget(item_frame)
 
-        nav_frame = ctk.CTkFrame(self.ids_list_frame)
-        nav_frame.pack(pady=10)
+        nav_frame = QFrame()
+        nav_layout = QHBoxLayout(nav_frame)
+        nav_layout.setContentsMargins(5, 5, 5, 5)
 
         if self.current_page > 0:
-            ctk.CTkButton(nav_frame, text="⟵", width=60, command=self.prev_page).pack(side="left", padx=5)
+            prev_btn = QPushButton("⟵")
+            prev_btn.setMaximumWidth(60)
+            prev_btn.clicked.connect(self.prev_page)
+            nav_layout.addWidget(prev_btn)
 
         if end_id < max_id:
-            ctk.CTkButton(nav_frame, text="⟶", width=60, command=self.next_page).pack(side="left", padx=5)
+            next_btn = QPushButton("⟶")
+            next_btn.setMaximumWidth(60)
+            next_btn.clicked.connect(self.next_page)
+            nav_layout.addWidget(next_btn)
             
+        self.ids_list_frame.scroll_layout.addWidget(nav_frame)
+        self.ids_list_frame.scroll_layout.addStretch()
         self.hide_loading()
 
             
     def refresh_sprite_list(self):
-        for w in self.sprite_list_frame.winfo_children():
-            w.destroy()
+        # Clear existing widgets
+        while self.sprite_list_frame.scroll_layout.count():
+            item = self.sprite_list_frame.scroll_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
         
         self.sprite_thumbs.clear()
         self.visible_sprite_widgets = {} 
@@ -1509,71 +1594,72 @@ class DatSprTab(ctk.CTkFrame):
         end = min(start + self.sprites_per_page, total + 1)
 
         for spr_id in range(start, end):
-            item_frame = ctk.CTkFrame(self.sprite_list_frame, fg_color="transparent")
-            item_frame.pack(pady=1, fill="x")
+            item_frame = QFrame()
+            item_frame.setFrameShape(QFrame.Shape.NoFrame)
+            item_layout = QHBoxLayout(item_frame)
+            item_layout.setContentsMargins(2, 1, 2, 1)
 
             is_current = (spr_id == self.selected_sprite_id)
             
             bg_color = "#555555" if is_current else "transparent"
             txt_color = "cyan" if is_current else "white"
 
-            def on_item_click(e, sid=spr_id):
-                self.select_sprite(sid, from_preview_click=False)
+            def make_click_handler(sid):
+                return lambda: self.select_sprite(sid, from_preview_click=False)
 
-            img_label = ctk.CTkLabel(item_frame, text="", width=80, height=80, fg_color="#222121")
-            img_label.pack(side="left", padx=(2, 5))
+            img_label = DraggableLabel(sprite_id=spr_id)          
+            img_label.setMinimumSize(80, 80)
+            img_label.setMaximumSize(80, 80)
+            img_label.setStyleSheet("background-color: #222121; border: 1px solid gray;")
+            img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             
-            text_label = ctk.CTkLabel(
-                item_frame,
-                text=str(spr_id),
-                width=60,
-                anchor="w",
-                fg_color=bg_color,   
-                text_color=txt_color 
-            )
-            text_label.pack(side="left", fill="x", expand=True)
+            text_label = ClickableLabel(str(spr_id))
+            text_label.setMinimumWidth(60)
+            text_label.setStyleSheet(f"background-color: {bg_color}; color: {txt_color}; padding: 5px;")
+            text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             
             self.visible_sprite_widgets[spr_id] = text_label
 
             img = self.spr.get_sprite(spr_id)
             if img:
-                thumb = img.resize((32, 32), Image.NEAREST)
-                tk_img = ctk.CTkImage(light_image=thumb, dark_image=thumb, size=(72, 72))
-                img_label.configure(image=tk_img)
-                self.sprite_thumbs[spr_id] = tk_img
+                thumb = img.resize((72, 72), Image.NEAREST)
+                pixmap = pil_to_qpixmap(thumb)
+                img_label.setPixmap(pixmap.scaled(72, 72, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
-            item_frame.bind("<Double-Button-1>", on_item_click)
-            img_label.bind("<Double-Button-1>", on_item_click)
-            text_label.bind("<Double-Button-1>", on_item_click)
-                        
-            item_frame.bind("<ButtonPress-1>", lambda e, s=spr_id: self.on_drag_start(e, s))
-            img_label.bind("<ButtonPress-1>", lambda e, s=spr_id: self.on_drag_start(e, s))
-            text_label.bind("<ButtonPress-1>", lambda e, s=spr_id: self.on_drag_start(e, s))
-
-            item_frame.bind("<ButtonRelease-1>", self.on_drag_end)
-            img_label.bind("<ButtonRelease-1>", self.on_drag_end)
-            text_label.bind("<ButtonRelease-1>", self.on_drag_end)            
+            item_layout.addWidget(img_label)
+            item_layout.addWidget(text_label, 1)
             
-            item_frame.bind("<Button-3>", lambda e, sid=spr_id: self.show_context_menu(e, sid, "sprite_list"))
-            img_label.bind("<Button-3>", lambda e, sid=spr_id: self.show_context_menu(e, sid, "sprite_list"))
-            text_label.bind("<Button-3>", lambda e, sid=spr_id: self.show_context_menu(e, sid, "sprite_list"))
+            img_label.doubleClicked.connect(make_click_handler(spr_id))
+            text_label.doubleClicked.connect(make_click_handler(spr_id))
+            
+            
+            def make_context_handler(sid):
+                return lambda pos: self.show_context_menu(pos, sid, "sprite_list")
+            
+            img_label.rightClicked.connect(make_context_handler(spr_id))
+            text_label.rightClicked.connect(make_context_handler(spr_id))
 
-        nav = ctk.CTkFrame(self.sprite_list_frame)
-        nav.pack(pady=10)
+            self.sprite_list_frame.scroll_layout.addWidget(item_frame)
+
+        nav = QFrame()
+        nav_layout = QHBoxLayout(nav)
+        nav_layout.setContentsMargins(5, 5, 5, 5)
 
         if self.sprite_page > 0:
-            ctk.CTkButton(
-                nav, text="⟵", width=60,
-                command=self.prev_sprite_page
-            ).pack(side="left", padx=5)
+            prev_btn = QPushButton("⟵")
+            prev_btn.setMaximumWidth(60)
+            prev_btn.clicked.connect(self.prev_sprite_page)
+            nav_layout.addWidget(prev_btn)
 
         if end <= total:
-            ctk.CTkButton(
-                nav, text="⟶", width=60,
-                command=self.next_sprite_page
-            ).pack(side="left", padx=5)
+            next_btn = QPushButton("⟶")
+            next_btn.setMaximumWidth(60)
+            next_btn.clicked.connect(self.next_sprite_page)
+            nav_layout.addWidget(next_btn)
     
-            self.hide_loading()
+        self.sprite_list_frame.scroll_layout.addWidget(nav)
+        self.sprite_list_frame.scroll_layout.addStretch()
+        self.hide_loading()
 
     
             
@@ -1587,12 +1673,12 @@ class DatSprTab(ctk.CTkFrame):
         for spr_id, label_widget in self.visible_sprite_widgets.items():
             if spr_id == self.selected_sprite_id:
                 try:
-                    label_widget.configure(fg_color="#555555", text_color="cyan")
+                    label_widget.setStyleSheet("background-color: #555555; color: cyan; padding: 5px;")
                 except:
                     pass
             else:
                 try:
-                    label_widget.configure(fg_color="transparent", text_color="white")
+                    label_widget.setStyleSheet("background-color: transparent; color: white; padding: 5px;")
                 except:
                     pass
             
@@ -1613,9 +1699,10 @@ class DatSprTab(ctk.CTkFrame):
             
     def update_preview_image(self):
         if not self.spr or not hasattr(self, 'current_preview_sprite_list') or not self.current_preview_sprite_list:
-            self.image_label.configure(image=None, text="No sprite")
-            self.prev_index_label.configure(text="Sprite 0 / 0")
-            self.preview_info.configure(text="")
+            self.image_label.clear()
+            self.image_label.setText("No sprite")
+            self.prev_index_label.setText("Sprite 0 / 0")
+            self.preview_info.setText("")
             return
 
         if self.current_preview_index < 0:
@@ -1632,24 +1719,18 @@ class DatSprTab(ctk.CTkFrame):
             preview_size = (128, 128) 
             img_resized = img.resize(preview_size, Image.NEAREST)
 
-            tk_img = ctk.CTkImage(
-                light_image=img_resized,
-                dark_image=img_resized,
-                size=preview_size
-            )
-            
-            self.image_label.configure(image=tk_img, text="")
-            self.image_label.image = tk_img 
+            pixmap = pil_to_qpixmap(img_resized)
+            self.image_label.setPixmap(pixmap.scaled(128, 128, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            self._kept_image = pixmap
         else:
-            self.image_label.configure(image=None, text="Empty/Error")
+            self.image_label.clear()
+            self.image_label.setText("Empty/Error")
 
         total = len(self.current_preview_sprite_list)
-        self.prev_index_label.configure(text=f"Sprite {self.current_preview_index + 1} / {total}")
-        self.preview_info.configure(text=f"Sprite ID: {sprite_id}")
-            
-
-        
-    def on_preview_click(self, event):
+        self.prev_index_label.setText(f"Sprite {self.current_preview_index + 1} / {total}")
+        self.preview_info.setText(f"Sprite ID: {sprite_id}")
+                
+    def on_preview_click(self):
         preview_list = getattr(self, 'current_preview_sprite_list', [])
         
         if not preview_list:
@@ -1664,10 +1745,8 @@ class DatSprTab(ctk.CTkFrame):
         self.select_sprite(current_sprite_id, from_preview_click=True) 
         
         if hasattr(self, 'status_label'):
-            self.status_label.configure(
-                text=f"Selected sprite {current_sprite_id} from preview.",
-                text_color="cyan"
-            )
+            self.status_label.setText(f"Selected sprite {current_sprite_id} from preview.")
+            self.status_label.setStyleSheet("color: cyan;")
 
             
     def select_sprite(self, sprite_id, from_preview_click=False):
@@ -1690,7 +1769,7 @@ class DatSprTab(ctk.CTkFrame):
             self.update_list_selection_visuals()
 
         try:
-            self.after(50, lambda: self._scroll_to_sprite(sprite_id))
+            QTimer.singleShot(50, lambda: self._scroll_to_sprite(sprite_id))
         except:
             pass
 
@@ -1698,72 +1777,73 @@ class DatSprTab(ctk.CTkFrame):
     def _scroll_to_sprite(self, sprite_id):
         index_in_page = (sprite_id - 1) % self.sprites_per_page
         scroll_pos = index_in_page / self.sprites_per_page
-        self.sprite_list_frame._parent_canvas.yview_moveto(scroll_pos)
+        scrollbar = self.sprite_list_frame.scroll.verticalScrollBar()
+        if scrollbar:
+            max_val = scrollbar.maximum()
+            scrollbar.setValue(int(scroll_pos * max_val))
 
 
     def load_single_id(self, item_id):
         if not self.editor: return
 
         cat_map = {"Item": "items", "Outfit": "outfits", "Effect": "effects", "Missile": "missiles"}
-        current_cat_key = cat_map.get(self.category_var.get(), "items")
+        current_cat_key = cat_map.get(self.category_combo.currentText(), "items")
 
         self.current_ids = [item_id]
-        self.id_entry.delete(0, "end")
-        self.id_entry.insert(0, str(item_id))
+        self.id_entry.setText(str(item_id))
 
         self.update_checkboxes_for_ids(current_cat_key) 
         self.prepare_preview_for_current_ids(current_cat_key)
 
         for iid, button in self.id_buttons.items():
             if iid == item_id:
-                button.configure(fg_color="#555555", text_color="cyan")
+                button.setStyleSheet("background-color: #555555; color: cyan; padding: 5px;")
             else:
-                button.configure(fg_color=("gray15", "gray25"), text_color="white")
+                button.setStyleSheet("background-color: gray15; color: white; padding: 5px;")
 
-        self.status_label.configure(text=f"ID {item_id} ({current_cat_key}) loaded.", text_color="cyan")
+        self.status_label.setText(f"ID {item_id} ({current_cat_key}) loaded.")
+        self.status_label.setStyleSheet("color: cyan;")
 
 
 
     def disable_editing(self):
-        self.id_entry.configure(state="disabled")
-        self.load_ids_button.configure(state="disabled")
-        self.apply_button.configure(state="disabled")
-        self.save_button.configure(state="disabled")
+        self.id_entry.setEnabled(False)
+        self.load_ids_button.setEnabled(False)
+        self.apply_button.setEnabled(False)
+        self.save_button.setEnabled(False)
         for cb in self.checkboxes.values():
-            cb.configure(state="disabled")
-        self.numeric_entries["ShowOnMinimap"].configure(state="disabled")
-        #self.load_spr_button.configure(state="normal")
+            cb.setEnabled(False)
         for entry in self.numeric_entries.values():
-            entry.configure(state="disabled")
-        self.insert_id_button.configure(state="disabled")  
-        self.delete_id_button.configure(state="disabled")       
+            entry.setEnabled(False)
+        self.insert_id_button.setEnabled(False)  
+        self.delete_id_button.setEnabled(False)       
 
     def enable_editing(self):
-        self.id_entry.configure(state="normal")
-        self.load_ids_button.configure(state="normal")
-        self.apply_button.configure(state="normal")
-        self.save_button.configure(state="normal")
-        self.insert_id_button.configure(state="normal")  
-        self.delete_id_button.configure(state="normal")     
+        self.id_entry.setEnabled(True)
+        self.load_ids_button.setEnabled(True)
+        self.apply_button.setEnabled(True)
+        self.save_button.setEnabled(True)
+        self.insert_id_button.setEnabled(True)  
+        self.delete_id_button.setEnabled(True)     
         for cb in self.checkboxes.values():
-            cb.configure(state="normal")
-        self.numeric_entries["ShowOnMinimap"].configure(state="normal")
+            cb.setEnabled(True)
         for entry in self.numeric_entries.values():
-            entry.configure(state="normal")        
-
+            entry.setEnabled(True)        
           
     def load_dat_file(self):
-        filepath = filedialog.askopenfilename(
-            title="Select the .dat file",
-            filetypes=[("DAT files", "*.dat"), ("All files", "*.*")]
+        filepath, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select the .dat file",
+            "",
+            "DAT files (*.dat);;All files (*.*)"
         )
         if not filepath:
             return
 
         self.show_loading("Loading...\nPlease wait.")
         
-        is_extended = bool(self.chk_extended.get())
-        is_transparency = bool(self.chk_transparency.get())
+        is_extended = self.chk_extended.isChecked()
+        is_transparency = self.chk_transparency.isChecked()
         
         try:
 
@@ -1782,24 +1862,24 @@ class DatSprTab(ctk.CTkFrame):
                 
                 if hasattr(self, 'spr') and self.spr:
                     pass  
-                self.spr = SprEditor(spr_path, transparency=self.chk_transparency.get())
+                self.spr = SprEditor(spr_path, transparency=is_transparency)
                 self.spr.load()
 
     
-                self.preview_info.configure(
-                    text=f"SPR loaded: {spr_path}\nSprites: {self.spr.sprite_count}"
+                self.preview_info.setText(
+                    f"SPR loaded: {os.path.basename(spr_path)}\nSprites: {self.spr.sprite_count}"
                 )
                 self.sprite_page = 0
 
-                # update sprite list
                 self.refresh_sprite_list()
-            # update list id's              
+          
             self.refresh_id_list()                
 
         except Exception as e:
             print(e)
-            messagebox.showerror("Load Error", f"Could not load or parse the file:\n{e}")
-            self.status_label.configure(text="Failed to load the file.", text_color="red")
+            QMessageBox.critical(self, "Load Error", f"Could not load or parse the file:\n{e}")
+            self.status_label.setText("Failed to load the file.")
+            self.status_label.setStyleSheet("color: red;")
 
         finally:
             self.hide_loading()
@@ -1808,17 +1888,15 @@ class DatSprTab(ctk.CTkFrame):
             if hasattr(self, 'spr') and self.spr is not None:
                 spr_count = self.spr.sprite_count
 
-            self.status_label.configure(
-                text=(
-                    f"Files loaded! "
-                    f"Items: {self.editor.counts['items']}  /  "
-                    f"Outfits: {self.editor.counts['outfits']}  /  "
-                    f"Effects: {self.editor.counts['effects']}  /  "
-                    f"Missiles: {self.editor.counts['missiles']}  /  "
-                    f"Sprite Total: {spr_count}"
-                ),
-                text_color="cyan"
+            self.status_label.setText(
+                f"Files loaded! "
+                f"Items: {self.editor.counts['items']}  /  "
+                f"Outfits: {self.editor.counts['outfits']}  /  "
+                f"Effects: {self.editor.counts['effects']}  /  "
+                f"Missiles: {self.editor.counts['missiles']}  /  "
+                f"Sprite Total: {spr_count}"
             )
+            self.status_label.setStyleSheet("color: cyan;")
                            
     def parse_ids(self, id_string):
         ids = set()
@@ -1835,33 +1913,35 @@ class DatSprTab(ctk.CTkFrame):
                     ids.add(int(part))
             return sorted(list(ids))
         except ValueError:
-            self.status_label.configure(text="Error: Invalid ID format.", text_color="orange")
+            self.status_label.setText("Error: Invalid ID format.")
+            self.status_label.setStyleSheet("color: orange;")
       
             return []
 
     def load_ids_from_entry(self):
         if not self.editor: return
         
-        id_string = self.id_entry.get()
+        id_string = self.id_entry.text()
         self.current_ids = self.parse_ids(id_string)
         
         if not self.current_ids:
             if id_string:
-                messagebox.showwarning("Invalid IDs", "Incorrect format.")
+                QMessageBox.warning(self, "Invalid IDs", "Incorrect format.")
             for cb in self.checkboxes.values():
-                cb.deselect()
-                cb.configure(text_color="white")
+                cb.setChecked(False)
             self.clear_preview()
             return
 
 
         cat_map = {"Item": "items", "Outfit": "outfits", "Effect": "effects", "Missile": "missiles"}
-        current_cat_key = cat_map.get(self.category_var.get(), "items")
+        current_cat_key = cat_map.get(self.category_combo.currentText(), "items")
 
-        self.status_label.configure(text=f"Consultando {len(self.current_ids)} IDs...", text_color="cyan")
+        self.status_label.setText(f"Consultando {len(self.current_ids)} IDs...")
+        self.status_label.setStyleSheet("color: cyan;")
         
         self.update_checkboxes_for_ids(category=current_cat_key)
-        self.status_label.configure(text=f"{len(self.current_ids)} IDs loaded...", text_color="white")
+        self.status_label.setText(f"{len(self.current_ids)} IDs loaded...")
+        self.status_label.setStyleSheet("color: white;")
         self.prepare_preview_for_current_ids(category=current_cat_key)
 
         first_id = self.current_ids[0]
@@ -1877,14 +1957,17 @@ class DatSprTab(ctk.CTkFrame):
 
             for iid, button in self.id_buttons.items():
                 if iid in self.current_ids:
-                    button.configure(fg_color="#555555", text_color="cyan")
+                    button.setStyleSheet("background-color: #555555; color: cyan; padding: 5px;")
                 else:
-                    button.configure(fg_color=("gray15", "gray25"), text_color="white")
+                    button.setStyleSheet("background-color: gray15; color: white; padding: 5px;")
 
             try:
                 index_in_page = (first_id - base_offset) % self.ids_per_page
                 scroll_pos = max(0, index_in_page / self.ids_per_page)
-                self.ids_list_frame._parent_canvas.yview_moveto(scroll_pos)
+                scrollbar = self.ids_list_frame.scroll.verticalScrollBar()
+                if scrollbar:
+                    max_val = scrollbar.maximum()
+                    scrollbar.setValue(int(scroll_pos * max_val))
             except Exception:
                 pass
 
@@ -1899,13 +1982,17 @@ class DatSprTab(ctk.CTkFrame):
                      for item_id in self.current_ids if item_id in things_dict]
             
             if not states:
-                cb.deselect(); cb.configure(text_color="gray")
+                cb.setChecked(False)
+                cb.setStyleSheet("color: gray;")
             elif all(states):
-                cb.select(); cb.configure(text_color="white")
+                cb.setChecked(True)
+                cb.setStyleSheet("color: white;")
             elif not any(states):
-                cb.deselect(); cb.configure(text_color="white")
+                cb.setChecked(False)
+                cb.setStyleSheet("color: white;")
             else:
-                cb.deselect(); cb.configure(text_color="cyan")
+                cb.setChecked(False)
+                cb.setStyleSheet("color: cyan;")
         
         self.load_numeric_attribute("ShowOnMinimap", "ShowOnMinimap_data", 0, category)
         self.load_numeric_attribute("HasElevation", "HasElevation_data", 0, category)
@@ -1942,29 +2029,28 @@ class DatSprTab(ctk.CTkFrame):
                     values.append(data)
         
         if not values:
-            entry.delete(0, "end")
+            entry.clear()
             if entry_key in self.numeric_previews:
-                self.numeric_previews[entry_key].configure(fg_color="#888888")
+                self.numeric_previews[entry_key].setStyleSheet("background-color: #888888; border: 1px solid gray;")
         elif all(v == values[0] for v in values):
-            entry.delete(0, "end")
-            entry.insert(0, str(values[0]))
+            entry.setText(str(values[0]))
             if entry_key in self.numeric_previews:
                 self.update_color_preview(entry_key)
         else:
-            entry.delete(0, "end")
+            entry.clear()
             if entry_key in self.numeric_previews:
-                self.numeric_previews[entry_key].configure(fg_color="gray")
+                self.numeric_previews[entry_key].setStyleSheet("background-color: gray; border: 1px solid gray;")
 
     def apply_changes(self):
         if not self.editor or not self.current_ids:
-            messagebox.showwarning("No Action", "Load a file and check some IDs first.")
+            QMessageBox.warning(self, "No Action", "Load a file and check some IDs first.")
             return
 
         to_set, to_unset = [], []
         original_states = {}
 
         cat_map = {"Item": "items", "Outfit": "outfits", "Effect": "effects", "Missile": "missiles"}
-        current_cat_key = cat_map.get(self.category_var.get(), "items")
+        current_cat_key = cat_map.get(self.category_combo.currentText(), "items")
         
         things_dict = self.editor.things.get(current_cat_key, {})
 
@@ -1982,9 +2068,9 @@ class DatSprTab(ctk.CTkFrame):
                 original_states[attr_name] = 'mixed'
 
         for attr_name, cb in self.checkboxes.items():
-            if cb.get() == 1 and original_states[attr_name] != 'all':
+            if cb.isChecked() and original_states[attr_name] != 'all':
                 to_set.append(attr_name)
-            elif cb.get() == 0 and original_states[attr_name] != 'none':
+            elif not cb.isChecked() and original_states[attr_name] != 'none':
                 to_unset.append(attr_name)
          
         changes_applied = False
@@ -2004,10 +2090,12 @@ class DatSprTab(ctk.CTkFrame):
             changes_applied = True
         
         if not changes_applied:
-            self.status_label.configure(text="No changes detected.", text_color="yellow")
+            self.status_label.setText("No changes detected.")
+            self.status_label.setStyleSheet("color: yellow;")
             return
      
-        self.status_label.configure(text="Changes applied. Save with 'Compile as...'", text_color="green")
+        self.status_label.setText("Changes applied. Save with 'Compile as...'")
+        self.status_label.setStyleSheet("color: green;")
         
         self.update_checkboxes_for_ids(category=current_cat_key)
         self.prepare_preview_for_current_ids(category=current_cat_key)
@@ -2016,7 +2104,7 @@ class DatSprTab(ctk.CTkFrame):
     def apply_numeric_attribute(self, entry_key, data_key, index, signed, category="items"):
         entry = self.numeric_entries.get(entry_key)
         if not entry: return False
-        val_str = entry.get().strip()
+        val_str = entry.text().strip()
         if not val_str: return False
             
         try:
@@ -2036,8 +2124,9 @@ class DatSprTab(ctk.CTkFrame):
         x_entry = self.numeric_entries.get("HasOffset_X")
         y_entry = self.numeric_entries.get("HasOffset_Y")
         if not x_entry or not y_entry: return False
-        x_str = x_entry.get().strip()
-        y_str = y_entry.get().strip()
+        
+        x_str = x_entry.text().strip()
+        y_str = y_entry.text().strip()
         if not x_str and not y_str: return False
             
         try:
@@ -2057,8 +2146,9 @@ class DatSprTab(ctk.CTkFrame):
         level_entry = self.numeric_entries.get("HasLight_Level")
         color_entry = self.numeric_entries.get("HasLight_Color")
         if not level_entry or not color_entry: return False
-        level_str = level_entry.get().strip()
-        color_str = color_entry.get().strip()
+        
+        level_str = level_entry.text().strip()
+        color_str = color_entry.text().strip()
         if not level_str and not color_str: return False
             
         try:
@@ -2077,13 +2167,14 @@ class DatSprTab(ctk.CTkFrame):
 
     def save_dat_file(self):
         if not self.editor:
-            messagebox.showerror("Error", "No .dat file is loaded.")
+            QMessageBox.critical(self, "Error", "No .dat file is loaded.")
             return
             
-        filepath = filedialog.asksaveasfilename(
-            title="Save DAT and SPR file as...", 
-            defaultextension=".dat", 
-            filetypes=[("DAT files", "*.dat"), ("All files", "*.*")]
+        filepath, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save DAT and SPR file as...",
+            "",
+            "DAT files (*.dat);;All files (*.*)"
         )
         
         if not filepath: 
@@ -2098,22 +2189,21 @@ class DatSprTab(ctk.CTkFrame):
                 base_path = os.path.splitext(filepath)[0]
                 spr_dest_path = base_path + ".spr"
                 
-
                 self.spr.save(spr_dest_path)
                 
                 msg_extra = f"\nAnd the .spr file was compiled/saved to:\n{os.path.basename(spr_dest_path)}"
             else:
                 msg_extra = "\nWarning: No .spr was loaded/saved."
 
-            self.status_label.configure(
-                text=f"Saved successfully: {os.path.basename(filepath)}", 
-                text_color="lightgreen"
-            )
-            messagebox.showinfo("Success", f"Files compiled successfully!{msg_extra}")
+            self.status_label.setText(f"Saved successfully: {os.path.basename(filepath)}")
+            self.status_label.setStyleSheet("color: #90ee90;") # Light green
+            
+            QMessageBox.information(self, "Success", f"Files compiled successfully!{msg_extra}")
             
         except Exception as e:
-            messagebox.showerror("Save Error", f"Could not save the file:\n{e}")
-            self.status_label.configure(text="Failed to save files.", text_color="red")
+            QMessageBox.critical(self, "Save Error", f"Could not save the file:\n{e}")
+            self.status_label.setText("Failed to save files.")
+            self.status_label.setStyleSheet("color: red;")
 
     def prepare_preview_for_current_ids(self, category="items"):
         self.current_preview_sprite_list = []
@@ -2155,17 +2245,17 @@ class DatSprTab(ctk.CTkFrame):
         self.show_preview_at_index(self.current_preview_index) 
 
     def clear_preview(self):
-        
         if self.is_animating:
             self.toggle_animation()
             
         try:
-            self.image_label.configure(image=None, text="")
+            self.image_label.clear()
+            self.image_label.setText("No sprite")
         except Exception:
             pass
             
-        self.image_label.image = None
-        self.preview_info.configure(text="No sprite available.")
+        self._kept_image = None
+        self.preview_info.setText("No sprite available.")
         self.current_preview_sprite_list = []
         self.current_preview_index = 0
 
@@ -2200,7 +2290,8 @@ class DatSprTab(ctk.CTkFrame):
         full_img = self.reconstruct_item_image(chunk_ids)
         
         if full_img is None:
-            self.image_label.configure(image=None, text="Error")
+            self.image_label.clear()
+            self.image_label.setText("Error")
             return
 
         w, h = full_img.size
@@ -2214,20 +2305,15 @@ class DatSprTab(ctk.CTkFrame):
 
         img_resized = full_img.resize((final_w, final_h), Image.NEAREST)
 
-        new_tk_image = ctk.CTkImage(
-            light_image=img_resized,
-            dark_image=img_resized,
-            size=(final_w, final_h)
-        )
+        pixmap = pil_to_qpixmap(img_resized)
         
-        self._kept_image = new_tk_image 
-        
-        self.image_label.configure(image=self._kept_image, text="")
+        self._kept_image = pixmap 
+        self.image_label.setPixmap(self._kept_image)
+        self.image_label.setText("")
    
         first_spr_id = chunk_ids[0] if chunk_ids else 0
-        self.prev_index_label.configure(text=f"Frame {idx+1}/{total_views} (Ref ID: {first_spr_id})")
-        self.preview_info.configure(text=f"Size: {w}x{h} | W:{self.current_item_width} H:{self.current_item_height} L:{self.current_item_layers}")
-
+        self.prev_index_label.setText(f"Frame {idx+1}/{total_views} (Ref ID: {first_spr_id})")
+        self.preview_info.setText(f"Size: {w}x{h} | W:{self.current_item_width} H:{self.current_item_height} L:{self.current_item_layers}")
 
     def reconstruct_item_image(self, sprite_ids):
         width = self.current_item_width
@@ -2256,7 +2342,6 @@ class DatSprTab(ctk.CTkFrame):
                     if sid > 0:
                         spr = self.spr.get_sprite(sid)
                         if spr:
-
                             dest_y = (height - h - 1) * 32                           
                             dest_x = (width - w - 1) * 32
 
@@ -2264,21 +2349,35 @@ class DatSprTab(ctk.CTkFrame):
         return canvas
 
     def build_loading_overlay(self):
-        self.loading_overlay = ctk.CTkFrame(self, fg_color="gray10", corner_radius=0)
+        self.loading_overlay = QFrame(self)
+        self.loading_overlay.setStyleSheet("background-color: rgba(0, 0, 0, 180);")
+        self.loading_overlay.hide()
 
-        self.loading_label = ctk.CTkLabel(
-            self.loading_overlay, 
-            text="Loading...", 
-            font=("Arial", 24, "bold"),
-            text_color="white"
-        )
-        self.loading_label.place(relx=0.5, rely=0.5, anchor="center")
+        # Layout para centralizar o texto
+        overlay_layout = QVBoxLayout(self.loading_overlay)
+        overlay_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.loading_label = QLabel("Loading...", self.loading_overlay)
+        self.loading_label.setStyleSheet("font-size: 24px; font-weight: bold; color: white; background: transparent;")
+        self.loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        overlay_layout.addWidget(self.loading_label)
 
     def show_loading(self, message="Loading..."):
-        self.loading_label.configure(text=message)
-        self.loading_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
-
-        self.update() 
+        if hasattr(self, 'loading_overlay'):
+            self.loading_label.setText(message)
+            self.loading_overlay.resize(self.size()) 
+            self.loading_overlay.raise_()
+            self.loading_overlay.show()
+            
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
 
     def hide_loading(self):
-        self.loading_overlay.place_forget()
+        if hasattr(self, 'loading_overlay'):
+            self.loading_overlay.hide()
+
+    def resizeEvent(self, event):
+        if hasattr(self, 'loading_overlay') and self.loading_overlay.isVisible():
+            self.loading_overlay.resize(self.size())
+        super().resizeEvent(event)
