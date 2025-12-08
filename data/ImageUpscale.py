@@ -1,372 +1,450 @@
-import customtkinter as ctk
-from tkinter import filedialog, messagebox
-from PIL import Image, ImageEnhance
-import numpy as np
 import os
 import subprocess
-import threading
+import numpy as np
+from PIL import Image, ImageEnhance, ImageQt
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+                             QLineEdit, QPushButton, QFrame, QSlider, 
+                             QCheckBox, QComboBox, QTextEdit, QScrollArea, 
+                             QFileDialog, QMessageBox, QGroupBox, QGridLayout)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
+from PyQt6.QtGui import QPixmap, QImage
 
-class ImageUpscaleTab(ctk.CTkFrame):
-    def __init__(self, parent, base_path):
-        super().__init__(parent)
-        self.base_path = base_path
-        
-        # Configurar caminho do executável Waifu
-        self.waifu_exe = os.path.join(base_path, "waifu2x-caffe", "waifu2x-caffe-cui.exe")
-        
-        self.input_photos = []
-        self.output_photos = []
-        
-        self.build_ui()
-        
-        self.build_loading_overlay()        
+# --- CLASSE WORKER PARA PROCESSAMENTO EM BACKGROUND ---
+# Isso é necessário para não travar a janela durante o processamento e
+# para atualizar a UI de forma segura (sem crashar).
+class ProcessingWorker(QThread):
+    log_signal = pyqtSignal(str)      # Sinal para enviar texto ao log
+    finished_signal = pyqtSignal()    # Sinal quando terminar tudo
+    error_signal = pyqtSignal(str)    # Sinal em caso de erro
 
-    def build_ui(self):
-        # Frame principal do Sprite Manager
-        self.frame = ctk.CTkFrame(self, corner_radius=10)
-        self.frame.pack(padx=10, pady=0, fill="x")
+    def __init__(self, params):
+        super().__init__()
+        self.params = params
+        self.stop_requested = False
 
-        # Pasta
-        ctk.CTkLabel(self.frame, text="Path:").pack(pady=0)
-        self.path_entry = ctk.CTkEntry(self.frame, placeholder_text="Choose a folder...")
-        self.path_entry.pack(padx=10, pady=0, fill="x")
-        ctk.CTkButton(self.frame, text="Search Folder", command=self.select_folder).pack(pady=5)
-
-        # Ajustes avançados
-        self.create_advanced_adjustments(self.frame)
-
-        # Controles Denoise / Upscale
-        self.create_denoise_upscale_controls(self.frame)
-
-        ctk.CTkButton(
-            self,
-            text="Apply",
-            height=25,
-            font=("Arial", 16),
-            fg_color="#ff9326",
-            hover_color="#ffa64c",
-            command=self.convert_images_thread
-        ).pack(pady=5)
-
-        # Frames para log e imagens
-        self.create_display_frames(self)
-
-        self.status = ctk.CTkLabel(self, text="Finish!", text_color="lightgreen")
-        self.status.pack(pady=5)
-        
-        
-
-    def build_loading_overlay(self):
-        self.loading_overlay = ctk.CTkFrame(self, fg_color="gray10", corner_radius=0)
-        
-        # Cria o label centralizado
-        self.loading_label = ctk.CTkLabel(
-            self.loading_overlay, 
-            text="Loading...", 
-            font=("Arial", 24, "bold"),
-            text_color="white"
-        )
-        self.loading_label.place(relx=0.5, rely=0.5, anchor="center")
-
-    def show_loading(self, message="Loading..."):
-        self.loading_label.configure(text=message)
-        # Place cobrindo tudo (relwidth=1, relheight=1)
-        self.loading_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
-        
-        # CRUCIAL: Força o desenho da tela antes de travar no processamento
-        self.update() 
-
-    def hide_loading(self):
-        self.loading_overlay.place_forget()
-        
-        
-
-    # ------------------- GUI Helpers -------------------
-    def create_advanced_adjustments(self, parent):
-        adv_frame = ctk.CTkFrame(parent, corner_radius=10)
-        adv_frame.pack(padx=10, pady=2, fill="x")
-        ctk.CTkLabel(adv_frame, text="Advanced").pack(pady=5)
-
-        # Brilho, Contraste, Cor
-        self.brightness_slider = ctk.CTkSlider(adv_frame, from_=0, to=2, number_of_steps=20)
-        self.brightness_slider.set(1.0)
-        ctk.CTkLabel(adv_frame, text="Bright").pack()
-        self.brightness_slider.pack(padx=10, pady=2, fill="x")
-
-        self.contrast_slider = ctk.CTkSlider(adv_frame, from_=0, to=2, number_of_steps=20)
-        self.contrast_slider.set(1.0)
-        ctk.CTkLabel(adv_frame, text="Contrast").pack()
-        self.contrast_slider.pack(padx=10, pady=2, fill="x")
-
-        self.color_slider = ctk.CTkSlider(adv_frame, from_=0, to=2, number_of_steps=20)
-        self.color_slider.set(1.0)
-        ctk.CTkLabel(adv_frame, text="Saturation").pack()
-        self.color_slider.pack(padx=10, pady=2, fill="x")
-
-        # Rotação
-        self.rotate_slider = ctk.CTkSlider(adv_frame, from_=0, to=360, number_of_steps=36)
-        self.rotate_slider.set(0)
-        ctk.CTkLabel(adv_frame, text="Rotation:").pack()
-        self.rotate_slider.pack(padx=10, pady=2, fill="x")
-
-        # Ajustes RGB
-        self.red_slider = ctk.CTkSlider(adv_frame, from_=0, to=2, number_of_steps=20)
-        self.red_slider.set(1.0)
-        ctk.CTkLabel(adv_frame, text="Red").pack()
-        self.red_slider.pack(padx=10, pady=2, fill="x")
-
-        self.green_slider = ctk.CTkSlider(adv_frame, from_=0, to=2, number_of_steps=20)
-        self.green_slider.set(1.0)
-        ctk.CTkLabel(adv_frame, text="Green").pack()
-        self.green_slider.pack(padx=10, pady=2, fill="x")
-
-        self.blue_slider = ctk.CTkSlider(adv_frame, from_=0, to=2, number_of_steps=20)
-        self.blue_slider.set(1.0)
-        ctk.CTkLabel(adv_frame, text="Blue").pack()
-        self.blue_slider.pack(padx=10, pady=2, fill="x")
-
-        # Flips
-        self.flip_horizontal = ctk.CTkSwitch(adv_frame, text="Mirror Horizontal")
-        self.flip_horizontal.pack(padx=10, pady=2)
-        self.flip_vertical = ctk.CTkSwitch(adv_frame, text="Mirror Vertical")
-        self.flip_vertical.pack(padx=10, pady=2)
-
-    def create_denoise_upscale_controls(self, parent):
-        controls_frame = ctk.CTkFrame(parent, corner_radius=10)
-        controls_frame.pack(padx=10, pady=5, fill="x")
-
-        # Denoise
-        denoise_frame = ctk.CTkFrame(controls_frame)
-        denoise_frame.pack(side="left", padx=10, pady=5)
-        ctk.CTkLabel(denoise_frame, text="Denoise").pack(side="left")
-        self.use_denoise = ctk.CTkSwitch(denoise_frame, text="", width=30)
-        self.use_denoise.pack(side="left", padx=5)
-        self.denoise_level = ctk.CTkComboBox(denoise_frame, values=["0", "1", "2", "3"], width=50)
-        self.denoise_level.set("1")
-        self.denoise_level.pack(side="left", padx=5)
-
-        # Upscale
-        upscale_frame = ctk.CTkFrame(controls_frame)
-        upscale_frame.pack(side="left", padx=10, pady=5)
-        ctk.CTkLabel(upscale_frame, text="Upscale").pack(side="left")
-        self.use_upscale = ctk.CTkSwitch(upscale_frame, text="", width=30)
-        self.use_upscale.pack(side="left", padx=5)
-        self.upscale_factor = ctk.CTkComboBox(upscale_frame, values=["2", "4", "8"], width=50)
-        self.upscale_factor.set("2")
-        self.upscale_factor.pack(side="left", padx=5)
-
-        # Resize
-        resize_frame = ctk.CTkFrame(controls_frame)
-        resize_frame.pack(side="left", padx=10, pady=5)
-        ctk.CTkLabel(resize_frame, text="Resize").pack(side="left")
-        self.use_resize = ctk.CTkSwitch(resize_frame, text="", width=30)
-        self.use_resize.pack(side="left", padx=5)
-        self.resize_output = ctk.CTkComboBox(resize_frame, values=["32", "64", "128", "240", "256", "512"], width=60)
-        self.resize_output.set("32")
-        self.resize_output.pack(side="left", padx=5)
-
-        # Custom Resize
-        custom_resize_frame = ctk.CTkFrame(controls_frame)
-        custom_resize_frame.pack(side="left", padx=10, pady=5)
-
-        ctk.CTkLabel(custom_resize_frame, text="Custom Size").pack(side="left")
-
-        self.use_custom_resize = ctk.CTkSwitch(custom_resize_frame, text="", width=30)
-        self.use_custom_resize.pack(side="left", padx=5)
-
-        self.custom_width = ctk.CTkEntry(custom_resize_frame, placeholder_text="W", width=55)
-        self.custom_width.pack(side="left", padx=2)
-
-        self.custom_height = ctk.CTkEntry(custom_resize_frame, placeholder_text="H", width=55)
-        self.custom_height.pack(side="left", padx=2)
-
-    def create_display_frames(self, parent):
-        main_display_frame = ctk.CTkFrame(parent, corner_radius=2)
-        main_display_frame.pack(padx=10, pady=0, fill="both", expand=True)
-        main_display_frame.grid_columnconfigure(0, weight=1)
-        main_display_frame.grid_columnconfigure(1, weight=1)
-        main_display_frame.grid_columnconfigure(2, weight=1)
-
-        # Log
-        log_frame = ctk.CTkFrame(main_display_frame, corner_radius=2)
-        log_frame.grid(row=0, column=0, padx=5, pady=0, sticky="nsew")
-        ctk.CTkLabel(log_frame, text="Log:").pack()
-        self.log_box = ctk.CTkTextbox(log_frame, height=10)
-        self.log_box.pack(padx=5, pady=5, fill="both", expand=True)
-
-        # Input
-        input_frame = ctk.CTkFrame(main_display_frame, corner_radius=2)
-        input_frame.grid(row=0, column=1, padx=5, pady=0, sticky="nsew")
-        ctk.CTkLabel(input_frame, text="Main Folder:").pack()
-        self.input_scroll = ctk.CTkScrollableFrame(input_frame, height=0)
-        self.input_scroll.pack(padx=5, pady=5, fill="both", expand=True)
-
-        # Output
-        output_frame = ctk.CTkFrame(main_display_frame, corner_radius=2)
-        output_frame.grid(row=0, column=2, padx=5, pady=0, sticky="nsew")
-        ctk.CTkLabel(output_frame, text="Output:").pack()
-        self.output_scroll = ctk.CTkScrollableFrame(output_frame, height=0)
-        self.output_scroll.pack(padx=5, pady=5, fill="both", expand=True)
-
-    def select_folder(self):
-        folder = filedialog.askdirectory()
-        if folder:
-            self.path_entry.delete(0, "end")
-            self.path_entry.insert(0, folder)
-            self.show_images(folder)
-
-    def show_images(self, folder):
-        # Limpa os widgets antigos
-        for widget in self.input_scroll.winfo_children():
-            widget.destroy()
-        for widget in self.output_scroll.winfo_children():
-            widget.destroy()
-
-        self.input_photos = []
-        self.output_photos = []
-
-        for file in os.listdir(folder):
-            if file.lower().endswith((".png", ".jpg", ".jpeg", ".bmp")):
-                path = os.path.join(folder, file)
-                img = Image.open(path)
-
-                ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(100, 100))
-                self.input_photos.append(ctk_img)
-
-                label = ctk.CTkLabel(self.input_scroll, image=ctk_img, text="")
-                label.pack(pady=5)
-
-        out_folder = os.path.join(folder, "output_processed")
-        if os.path.isdir(out_folder):
-            for file in os.listdir(out_folder):
-                if file.lower().endswith((".png", ".jpg", ".jpeg", ".bmp")):
-                    path = os.path.join(out_folder, file)
-                    img = Image.open(path)
-
-                    ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(50, 50))
-                    self.output_photos.append(ctk_img)
-
-                    label = ctk.CTkLabel(self.output_scroll, image=ctk_img, text="")
-                    label.pack(pady=5)
-
-    def log(self, msg):
-        self.log_box.insert("end", msg + "\n")
-        self.log_box.see("end")
-
-    def process_pillow_image(self, img):
-        
-        
-        self.show_loading("Loading...\nPlease wait.") 
-        
-        img = ImageEnhance.Brightness(img).enhance(self.brightness_slider.get())
-        img = ImageEnhance.Contrast(img).enhance(self.contrast_slider.get())
-        img = ImageEnhance.Color(img).enhance(self.color_slider.get())
-
-        img_np = np.array(img).astype(np.float32)
-
-        # Ajustes RGB
-        img_np[..., 0] = np.clip(img_np[..., 0] * self.red_slider.get(), 0, 255)
-        img_np[..., 1] = np.clip(img_np[..., 1] * self.green_slider.get(), 0, 255)
-        img_np[..., 2] = np.clip(img_np[..., 2] * self.blue_slider.get(), 0, 255)
-
-        img = Image.fromarray(img_np.astype(np.uint8))
-
-        angle = self.rotate_slider.get()
-        if angle != 0:
-            img = img.rotate(angle, expand=True)
-        if self.flip_horizontal.get():
-            img = img.transpose(Image.FLIP_LEFT_RIGHT)
-        if self.flip_vertical.get():
-            img = img.transpose(Image.FLIP_TOP_BOTTOM)
-
-        return img
-        
-        self.hide_loading()          
-
-    def convert_images_thread(self):
-        threading.Thread(target=self.convert_images, daemon=True).start()
-
-    def convert_images(self):
-        folder = self.path_entry.get().strip()
-        if not os.path.isdir(folder):
-            messagebox.showerror("Error", "Select a valid folder!")
-            return
-        self.show_loading("Loading...\nPlease wait.") 
-        
-        denoise_enabled = self.use_denoise.get()
-        upscale_enabled = self.use_upscale.get()
-        resize_enabled = self.use_resize.get()
-        denoise_level = self.denoise_level.get()
-        upscale_factor = self.upscale_factor.get()
-        resize_final = int(self.resize_output.get())
-
-        custom_resize_enabled = self.use_custom_resize.get()
-        custom_w = self.custom_width.get()
-        custom_h = self.custom_height.get()
-
-        if custom_resize_enabled:
-            try:
-                custom_w = int(custom_w)
-                custom_h = int(custom_h)
-            except:
-                messagebox.showerror("Error", "Invalid Custom Resize values! Use only numbers.")
-                return
-
-        if not denoise_enabled and not upscale_enabled and not resize_enabled:
-            messagebox.showerror("Error", "Select at least one option!")
-            return
-
-        if (denoise_enabled or upscale_enabled) and not os.path.isfile(self.waifu_exe):
-            messagebox.showerror("Erro", f"File not found:\n{self.waifu_exe}")
-            return
-
+    def run(self):
+        folder = self.params['folder']
         out_folder = os.path.join(folder, "output_processed")
         os.makedirs(out_folder, exist_ok=True)
+        
+        files_to_process = [f for f in os.listdir(folder) if f.lower().endswith((".png", ".jpg", ".jpeg", ".bmp"))]
         count = 0
 
-        files_to_process = [f for f in os.listdir(folder) if f.lower().endswith((".png", ".jpg", ".jpeg", ".bmp"))]
-
+        waifu_exe = self.params['waifu_exe']
+        
         for file in files_to_process:
+            if self.stop_requested: break
+
             input_path = os.path.join(folder, file)
             temp_output = os.path.join(out_folder, "temp_" + file)
             final_output = os.path.join(out_folder, file)
             src = input_path
 
-            self.log(f"Processing: {file}")
+            self.log_signal.emit(f"Processing: {file}")
 
-            if denoise_enabled:
+            # 1. Waifu2x Denoise
+            if self.params['denoise_enabled']:
                 cmd = [
-                    self.waifu_exe, "-i", src, "-o", temp_output,
-                    "-s", "1", "-m", "noise", "-n", denoise_level, "-p", "cpu"
+                    waifu_exe, "-i", src, "-o", temp_output,
+                    "-s", "1", "-m", "noise", "-n", self.params['denoise_level'], "-p", "cpu"
                 ]
-                subprocess.run(cmd)
+                subprocess.run(cmd, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
                 src = temp_output
 
-            if upscale_enabled:
+            # 2. Waifu2x Upscale
+            if self.params['upscale_enabled']:
                 cmd = [
-                    self.waifu_exe, "-i", src, "-o", temp_output,
-                    "-s", upscale_factor, "-m", "noise_scale", "-n", denoise_level, "-p", "cpu"
+                    waifu_exe, "-i", src, "-o", temp_output,
+                    "-s", self.params['upscale_factor'], "-m", "noise_scale", 
+                    "-n", self.params['denoise_level'], "-p", "cpu"
                 ]
-                subprocess.run(cmd)
+                subprocess.run(cmd, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
                 src = temp_output
 
-            img = Image.open(src)
+            # 3. Pillow Processing (Resize, Color, Rotate)
+            try:
+                img = Image.open(src)
+                
+                # Resize logic
+                if self.params['custom_resize_enabled']:
+                    img = img.resize((self.params['custom_w'], self.params['custom_h']), Image.NEAREST)
+                elif self.params['resize_enabled']:
+                    size = self.params['resize_final']
+                    img = img.resize((size, size), Image.NEAREST)
 
-            if custom_resize_enabled:
-                img = img.resize((custom_w, custom_h), Image.NEAREST)
-            elif resize_enabled:
-                img = img.resize((resize_final, resize_final), Image.NEAREST)
+                # Visual adjustments
+                img = self.apply_pillow_adjustments(img)
+                img.save(final_output)
+                
+                count += 1
 
-            img = self.process_pillow_image(img)
-            img.save(final_output)
+            except Exception as e:
+                self.log_signal.emit(f"Error processing {file}: {str(e)}")
 
+            # Cleanup temp
             if os.path.exists(temp_output):
                 os.remove(temp_output)
 
-            count += 1
+        self.log_signal.emit(f"Completed! {count} images processed.")
+        self.finished_signal.emit()
 
-        self.show_images(folder)
-        self.status.configure(text=f"Completed! {count} processed images.")
-        messagebox.showinfo("Ready", f"{count} Images were successfully generated!")
+    def apply_pillow_adjustments(self, img):
+        p = self.params
+        img = ImageEnhance.Brightness(img).enhance(p['brightness'])
+        img = ImageEnhance.Contrast(img).enhance(p['contrast'])
+        img = ImageEnhance.Color(img).enhance(p['saturation'])
 
-        self.hide_loading()       
+        img_np = np.array(img).astype(np.float32)
+
+        # RGB Adjustments
+        img_np[..., 0] = np.clip(img_np[..., 0] * p['red'], 0, 255)
+        img_np[..., 1] = np.clip(img_np[..., 1] * p['green'], 0, 255)
+        img_np[..., 2] = np.clip(img_np[..., 2] * p['blue'], 0, 255)
+
+        img = Image.fromarray(img_np.astype(np.uint8))
+
+        if p['rotation'] != 0:
+            img = img.rotate(p['rotation'], expand=True)
+        if p['flip_h']:
+            img = img.transpose(Image.FLIP_LEFT_RIGHT)
+        if p['flip_v']:
+            img = img.transpose(Image.FLIP_TOP_BOTTOM)
+            
+        return img
+
+
+# --- CLASSE PRINCIPAL DA ABA ---
+class ImageUpscaleTab(QWidget):
+    def __init__(self, parent_widget_ignored, base_path): 
+        # Nota: em PyQt, geralmente não passamos o parent no __init__ se vamos adicionar em layout depois, 
+        # mas mantive a assinatura similar para facilitar sua integração.
+        super().__init__()
+        self.base_path = base_path
+        
+        # Configurar caminho do executável Waifu
+        self.waifu_exe = os.path.join(base_path, "waifu2x-caffe", "waifu2x-caffe-cui.exe")
+        
+        self.layout_main = QVBoxLayout(self)
+        self.build_ui()
+        self.build_loading_overlay()
+
+    def build_ui(self):
+        # --- PATH SELECTION ---
+        path_frame = QFrame()
+        path_layout = QHBoxLayout(path_frame)
+        path_layout.setContentsMargins(0,0,0,0)
+        
+        self.path_entry = QLineEdit()
+        self.path_entry.setPlaceholderText("Choose a folder...")
+        btn_search = QPushButton("Search Folder")
+        btn_search.clicked.connect(self.select_folder)
+        
+        path_layout.addWidget(QLabel("Path:"))
+        path_layout.addWidget(self.path_entry)
+        path_layout.addWidget(btn_search)
+        
+        self.layout_main.addWidget(path_frame)
+
+        # --- ADVANCED ADJUSTMENTS (Group Box para organização) ---
+        self.create_advanced_adjustments()
+
+        # --- CONTROLS DENOISE / UPSCALE ---
+        self.create_denoise_upscale_controls()
+
+        # --- APPLY BUTTON ---
+        self.btn_apply = QPushButton("Apply Processing")
+        self.btn_apply.setFixedHeight(40)
+        # Estilizando o botão para parecer com o do CustomTkinter (Laranja)
+        self.btn_apply.setStyleSheet("""
+            QPushButton {
+                background-color: #ff9326;
+                color: black;
+                font-weight: bold;
+                font-size: 14px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #ffa64c;
+            }
+            QPushButton:pressed {
+                background-color: #e5821e;
+            }
+        """)
+        self.btn_apply.clicked.connect(self.start_processing)
+        self.layout_main.addWidget(self.btn_apply)
+
+        # --- DISPLAY FRAMES (Log, Input, Output) ---
+        self.create_display_frames()
+
+        # Status Label
+        self.status_label = QLabel("Ready")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setStyleSheet("color: lightgreen; font-weight: bold;")
+        self.layout_main.addWidget(self.status_label)
+
+    def create_advanced_adjustments(self):
+        group = QGroupBox("Advanced Adjustments")
+        layout = QGridLayout(group)
+        
+        # Helper para criar sliders (Qt usa int, precisamos converter para float logicamente)
+        def create_slider(label_text, min_v, max_v, default_v, scale_factor=100):
+            lbl = QLabel(label_text)
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(int(min_v * scale_factor), int(max_v * scale_factor))
+            slider.setValue(int(default_v * scale_factor))
+            return lbl, slider
+
+        # Brilho, Contraste, Saturação
+        l_br, self.slider_brightness = create_slider("Brightness", 0, 2, 1)
+        l_ct, self.slider_contrast = create_slider("Contrast", 0, 2, 1)
+        l_sat, self.slider_saturation = create_slider("Saturation", 0, 2, 1)
+
+        layout.addWidget(l_br, 0, 0); layout.addWidget(self.slider_brightness, 0, 1)
+        layout.addWidget(l_ct, 1, 0); layout.addWidget(self.slider_contrast, 1, 1)
+        layout.addWidget(l_sat, 2, 0); layout.addWidget(self.slider_saturation, 2, 1)
+
+        # RGB
+        l_r, self.slider_red = create_slider("Red", 0, 2, 1)
+        l_g, self.slider_green = create_slider("Green", 0, 2, 1)
+        l_b, self.slider_blue = create_slider("Blue", 0, 2, 1)
+
+        layout.addWidget(l_r, 0, 2); layout.addWidget(self.slider_red, 0, 3)
+        layout.addWidget(l_g, 1, 2); layout.addWidget(self.slider_green, 1, 3)
+        layout.addWidget(l_b, 2, 2); layout.addWidget(self.slider_blue, 2, 3)
+
+        # Rotação e Flips
+        l_rot, self.slider_rotate = create_slider("Rotation", 0, 360, 0, scale_factor=1) # Fator 1 pois é grau inteiro
+        self.chk_flip_h = QCheckBox("Mirror Horizontal")
+        self.chk_flip_v = QCheckBox("Mirror Vertical")
+
+        layout.addWidget(l_rot, 3, 0); layout.addWidget(self.slider_rotate, 3, 1)
+        layout.addWidget(self.chk_flip_h, 3, 2)
+        layout.addWidget(self.chk_flip_v, 3, 3)
+
+        self.layout_main.addWidget(group)
+
+    def create_denoise_upscale_controls(self):
+        frame = QFrame()
+        layout = QHBoxLayout(frame)
+        
+        # Denoise
+        self.chk_denoise = QCheckBox("Denoise")
+        self.combo_denoise = QComboBox()
+        self.combo_denoise.addItems(["0", "1", "2", "3"])
+        self.combo_denoise.setCurrentText("1")
+        layout.addWidget(self.chk_denoise)
+        layout.addWidget(self.combo_denoise)
+        
+        # Separator
+        line1 = QFrame(); line1.setFrameShape(QFrame.Shape.VLine); layout.addWidget(line1)
+
+        # Upscale
+        self.chk_upscale = QCheckBox("Upscale")
+        self.combo_upscale = QComboBox()
+        self.combo_upscale.addItems(["2", "4", "8"])
+        layout.addWidget(self.chk_upscale)
+        layout.addWidget(self.combo_upscale)
+
+        # Separator
+        line2 = QFrame(); line2.setFrameShape(QFrame.Shape.VLine); layout.addWidget(line2)
+
+        # Resize Standard
+        self.chk_resize = QCheckBox("Resize")
+        self.combo_resize = QComboBox()
+        self.combo_resize.addItems(["32", "64", "128", "240", "256", "512"])
+        self.combo_resize.setEditable(True) # Permite digitar
+        layout.addWidget(self.chk_resize)
+        layout.addWidget(self.combo_resize)
+
+        # Custom Resize
+        line3 = QFrame(); line3.setFrameShape(QFrame.Shape.VLine); layout.addWidget(line3)
+        
+        self.chk_custom_resize = QCheckBox("Custom Size")
+        self.entry_w = QLineEdit(); self.entry_w.setPlaceholderText("W"); self.entry_w.setFixedWidth(50)
+        self.entry_h = QLineEdit(); self.entry_h.setPlaceholderText("H"); self.entry_h.setFixedWidth(50)
+        
+        layout.addWidget(self.chk_custom_resize)
+        layout.addWidget(self.entry_w)
+        layout.addWidget(self.entry_h)
+
+        self.layout_main.addWidget(frame)
+
+    def create_display_frames(self):
+        display_container = QWidget()
+        layout = QHBoxLayout(display_container)
+        
+        # --- LOG ---
+        log_group = QGroupBox("Log")
+        log_layout = QVBoxLayout(log_group)
+        self.log_box = QTextEdit()
+        self.log_box.setReadOnly(True)
+        log_layout.addWidget(self.log_box)
+        
+        # --- INPUT SCROLL ---
+        input_group = QGroupBox("Main Folder")
+        input_layout = QVBoxLayout(input_group)
+        self.scroll_input = QScrollArea()
+        self.scroll_input.setWidgetResizable(True)
+        self.input_content = QWidget()
+        self.input_content_layout = QVBoxLayout(self.input_content)
+        self.scroll_input.setWidget(self.input_content)
+        input_layout.addWidget(self.scroll_input)
+
+        # --- OUTPUT SCROLL ---
+        output_group = QGroupBox("Output")
+        output_layout = QVBoxLayout(output_group)
+        self.scroll_output = QScrollArea()
+        self.scroll_output.setWidgetResizable(True)
+        self.output_content = QWidget()
+        self.output_content_layout = QVBoxLayout(self.output_content)
+        self.scroll_output.setWidget(self.output_content)
+        output_layout.addWidget(self.scroll_output)
+
+        layout.addWidget(log_group, 1)
+        layout.addWidget(input_group, 1)
+        layout.addWidget(output_group, 1)
+
+        self.layout_main.addWidget(display_container)
+
+    def build_loading_overlay(self):
+        # Overlay widget semi-transparente
+        self.overlay = QFrame(self)
+        self.overlay.setStyleSheet("background-color: rgba(0, 0, 0, 180);")
+        self.overlay.hide()
+        
+        # Label de loading
+        self.lbl_loading = QLabel("Processing...\nPlease Wait", self.overlay)
+        self.lbl_loading.setStyleSheet("color: white; font-size: 24px; font-weight: bold;")
+        self.lbl_loading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    def resizeEvent(self, event):
+        # Garante que o overlay cubra tudo ao redimensionar
+        self.overlay.resize(self.size())
+        self.lbl_loading.resize(self.size())
+        super().resizeEvent(event)
+
+    def show_loading(self, show=True):
+        if show:
+            self.overlay.raise_()
+            self.overlay.show()
+            self.btn_apply.setEnabled(False)
+        else:
+            self.overlay.hide()
+            self.btn_apply.setEnabled(True)
+
+    # --- LOGIC ---
+
+    def select_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Folder")
+        if folder:
+            self.path_entry.setText(folder)
+            self.load_images_to_scroll(folder, self.input_content_layout, is_input=True)
+
+    def load_images_to_scroll(self, folder, layout, is_input=True):
+        # Limpar layout
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget: widget.deleteLater()
+        
+        size = (100, 100) if is_input else (50, 50)
+        
+        if not os.path.exists(folder): return
+
+        files = sorted([f for f in os.listdir(folder) if f.lower().endswith((".png", ".jpg", ".bmp"))])
+        
+        # Limitando visualização para não travar se tiver 1000 imagens
+        # O PyQt carrega tudo na RAM, então cuidado com pastas gigantes
+        limit = 50 
+        for i, file in enumerate(files):
+            if i >= limit:
+                layout.addWidget(QLabel(f"... and {len(files)-limit} more"))
+                break
+                
+            path = os.path.join(folder, file)
+            try:
+                # Usando QPixmap para performance
+                pix = QPixmap(path)
+                if not pix.isNull():
+                    pix = pix.scaled(size[0], size[1], Qt.AspectRatioMode.KeepAspectRatio)
+                    lbl_img = QLabel()
+                    lbl_img.setPixmap(pix)
+                    lbl_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    layout.addWidget(lbl_img)
+            except:
+                pass
+        
+        layout.addStretch() # Empurra itens para cima
+
+    def log(self, message):
+        self.log_box.append(message)
+
+    def start_processing(self):
+        folder = self.path_entry.text().strip()
+        if not os.path.isdir(folder):
+            QMessageBox.critical(self, "Error", "Invalid Folder!")
+            return
+            
+        # Coletar parâmetros
+        params = {
+            'folder': folder,
+            'waifu_exe': self.waifu_exe,
+            
+            'denoise_enabled': self.chk_denoise.isChecked(),
+            'denoise_level': self.combo_denoise.currentText(),
+            
+            'upscale_enabled': self.chk_upscale.isChecked(),
+            'upscale_factor': self.combo_upscale.currentText(),
+            
+            'resize_enabled': self.chk_resize.isChecked(),
+            'resize_final': int(self.combo_resize.currentText()) if self.combo_resize.currentText().isdigit() else 32,
+            
+            'custom_resize_enabled': self.chk_custom_resize.isChecked(),
+            'custom_w': 0,
+            'custom_h': 0,
+            
+            # Ajustes Pillow (Sliders divididos por 100 ou 1)
+            'brightness': self.slider_brightness.value() / 100.0,
+            'contrast': self.slider_contrast.value() / 100.0,
+            'saturation': self.slider_saturation.value() / 100.0,
+            'red': self.slider_red.value() / 100.0,
+            'green': self.slider_green.value() / 100.0,
+            'blue': self.slider_blue.value() / 100.0,
+            'rotation': self.slider_rotate.value(),
+            'flip_h': self.chk_flip_h.isChecked(),
+            'flip_v': self.chk_flip_v.isChecked()
+        }
+
+        # Validação Custom Resize
+        if params['custom_resize_enabled']:
+            try:
+                params['custom_w'] = int(self.entry_w.text())
+                params['custom_h'] = int(self.entry_h.text())
+            except ValueError:
+                QMessageBox.critical(self, "Error", "Invalid Custom Size (must be numbers)")
+                return
+
+        if not (params['denoise_enabled'] or params['upscale_enabled'] or params['resize_enabled'] or params['custom_resize_enabled']):
+             QMessageBox.warning(self, "Warning", "Select at least one action (Denoise, Upscale or Resize)")
+             return
+             
+        if (params['denoise_enabled'] or params['upscale_enabled']) and not os.path.isfile(self.waifu_exe):
+             QMessageBox.critical(self, "Error", f"Waifu2x exe not found at:\n{self.waifu_exe}")
+             return
+
+        # Iniciar Worker
+        self.show_loading(True)
+        self.log_box.clear()
+        
+        self.worker = ProcessingWorker(params)
+        self.worker.log_signal.connect(self.log)
+        self.worker.finished_signal.connect(self.on_processing_finished)
+        self.worker.start()
+
+    def on_processing_finished(self):
+        self.show_loading(False)
+        self.status_label.setText("Processing Finished!")
+        folder = self.path_entry.text()
+        out_folder = os.path.join(folder, "output_processed")
+        self.load_images_to_scroll(out_folder, self.output_content_layout, is_input=False)
+        QMessageBox.information(self, "Success", "All images processed successfully.")
