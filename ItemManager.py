@@ -1,8 +1,9 @@
-import customtkinter as ctk
-import os
 import sys
-import tkinter as tk
-from PIL import Image, ImageTk
+import os
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QTabWidget, QLabel, QSplashScreen)
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QIcon, QPixmap, QPalette, QColor
 
 if getattr(sys, 'frozen', False):
     base_path = os.path.dirname(sys.executable)
@@ -13,81 +14,98 @@ data_path = os.path.join(base_path, "data")
 if data_path not in sys.path:
     sys.path.append(data_path)
 
-from ImageUpscale import ImageUpscaleTab
+from ImageUpscale import ImageUpscaleTab 
+from OtbReload import OtbReloadTab
 from datspr import DatSprTab
-from otbreload import OtbReloadTab
 
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("dark-blue")
-
-class App(ctk.CTk):
+class App(QMainWindow):
     def __init__(self):
         super().__init__()
-        
-        self.withdraw() 
-        self.title("Item Manager")
-        self.geometry("900x1000")
-        
-        # Define ícone
+
+        self.setWindowTitle("Item Manager")
+        self.resize(900, 1000)
+
         icon_path = os.path.join(base_path, "ItemManagerIco.ico")
         if os.path.exists(icon_path):
-            self.iconbitmap(icon_path)
+            self.setWindowIcon(QIcon(icon_path))
 
-        self.show_splash()
-
-    def show_splash(self):
-        splash_path = os.path.join(base_path, "ItemManagersplash.png")
-        
-        self.splash_window = ctk.CTkToplevel(self)
-        self.splash_window.overrideredirect(True) 
-        self.splash_window.attributes("-topmost", True)
-        
-        try:
-            pil_img = Image.open(splash_path)
-            width, height = pil_img.size
-            self.splash_image = ImageTk.PhotoImage(pil_img) 
-        except Exception as e:
-            print(f"Erro ao carregar splash: {e}")
-            self.end_splash()
-            return
-
-        screen_w = self.winfo_screenwidth()
-        screen_h = self.winfo_screenheight()
-        x = (screen_w // 2) - (width // 2)
-        y = (screen_h // 2) - (height // 2)
-        self.splash_window.geometry(f"{width}x{height}+{x}+{y}")
-
-        label = tk.Label(self.splash_window, image=self.splash_image, border=0)
-        label.pack()
-        
-        self.after(3000, self.end_splash)
-
-    def end_splash(self):
-        if hasattr(self, 'splash_window') and self.splash_window.winfo_exists():
-            self.splash_window.destroy()
-        
         self.build_main_interface()
-        self.deiconify()
-        self.state('zoomed')
 
     def build_main_interface(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        layout = QVBoxLayout(central_widget)
+        layout.setContentsMargins(10, 10, 10, 10)
 
-        self.tab_view = ctk.CTkTabview(self)
-        self.tab_view.pack(fill="both", expand=True, padx=10, pady=10)
+        self.tab_view = QTabWidget()
+        layout.addWidget(self.tab_view)
 
-        self.tab_manager = self.tab_view.add("Sprite Editor")
-        self.tab_sprdat = self.tab_view.add("Spr/Dat Editor")
-        self.tab_otbreload = self.tab_view.add("Otb Reload")
-
+        # tab 2
+        self.tab_manager = QWidget()
+        self.tab_view.addTab(self.tab_manager, "Sprite Editor")
+        manager_layout = QVBoxLayout(self.tab_manager)
         self.upscale_module = ImageUpscaleTab(self.tab_manager, base_path)
-        self.upscale_module.pack(fill="both", expand=True)
+        manager_layout.addWidget(self.upscale_module)
+        
+        # tab 2
+        self.datspr_module = DatSprTab()
+        self.tab_view.addTab(self.datspr_module, "Spr/Dat Editor")
 
-        self.datspr_module = DatSprTab(self.tab_sprdat)
-        self.datspr_module.pack(fill="both", expand=True)
+        # tab 3
+        self.tab_otbreload = QWidget()
+        self.tab_view.addTab(self.tab_otbreload, "Otb Reload")
+        
+        otb_layout = QVBoxLayout(self.tab_otbreload)
+        self.otb_module = OtbReloadTab()
+        otb_layout.addWidget(self.otb_module)
 
-        self.otb_module = OtbReloadTab(self.tab_otbreload)
-        self.otb_module.pack(fill="both", expand=True)
+def set_dark_theme(app):
+    """Configura um tema escuro estilo Fusion"""
+    app.setStyle("Fusion")
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.WindowText, Qt.GlobalColor.white)
+    palette.setColor(QPalette.ColorRole.Base, QColor(25, 25, 25))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, Qt.GlobalColor.white)
+    palette.setColor(QPalette.ColorRole.ToolTipText, Qt.GlobalColor.white)
+    palette.setColor(QPalette.ColorRole.Text, Qt.GlobalColor.white)
+    palette.setColor(QPalette.ColorRole.Button, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.ButtonText, Qt.GlobalColor.white)
+    palette.setColor(QPalette.ColorRole.BrightText, Qt.GlobalColor.red)
+    palette.setColor(QPalette.ColorRole.Link, QColor(42, 130, 218))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
+    palette.setColor(QPalette.ColorRole.HighlightedText, Qt.GlobalColor.black)
+    app.setPalette(palette)
 
 if __name__ == "__main__":
-    app = App()
-    app.mainloop()
+    app = QApplication(sys.argv)
+    
+    # Aplica o tema escuro
+    set_dark_theme(app)
+
+    # Lógica da Splash Screen
+    splash_path = os.path.join(base_path, "ItemManagersplash.png")
+    splash_pixmap = QPixmap(splash_path)
+
+    if not splash_pixmap.isNull():
+        splash = QSplashScreen(splash_pixmap, Qt.WindowType.WindowStaysOnTopHint)
+        splash.show()
+        
+        # Função para iniciar a janela principal após o delay
+        def show_main_window():
+            # Precisamos declarar main_window como global para o Garbage Collector não limpar
+            global main_window
+            main_window = App()
+            main_window.showMaximized() # Equivalente ao state('zoomed')
+            splash.finish(main_window) # Fecha o splash quando a main window abrir
+
+        # Configura timer de 3 segundos (3000ms)
+        QTimer.singleShot(3000, show_main_window)
+    else:
+        print("Erro ao carregar imagem de splash. Iniciando diretamente.")
+        main_window = App()
+        main_window.showMaximized()
+
+    sys.exit(app.exec())
