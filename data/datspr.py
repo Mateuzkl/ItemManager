@@ -12,6 +12,9 @@ import shutil
 import atexit
 
 
+from sliceObd import SliceWindow  
+
+
 METADATA_FLAGS = {
     0x00: ('Ground', '<H'), 0x01: ('GroundBorder', ''), 0x02: ('OnBottom', ''),
     0x03: ('OnTop', ''), 0x04: ('Container', ''), 0x05: ('Stackable', ''),
@@ -646,7 +649,7 @@ class DraggableLabel(ClickableLabel):
         
         mime_data.setText(str(self.sprite_id))
         drag.setMimeData(mime_data)
-        )
+        
         if self.pixmap():
             drag.setPixmap(self.pixmap().scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio))
             drag.setHotSpot(QPoint(16, 16))
@@ -933,7 +936,16 @@ class DatSprTab(QWidget):
         self.delete_id_button.clicked.connect(self.delete_ids)
         id_operations_frame.addWidget(self.delete_id_button)
         
+
+        self.slicer_id_button = QPushButton("Slicer")
+        self.slicer_id_button.clicked.connect(self.open_slicer) #
+        id_operations_frame.addWidget(self.slicer_id_button)  
+    
+        
         bottom_frame.addLayout(id_operations_frame)
+        
+        
+   
         
         self.apply_button = QPushButton("Save flags")
         self.apply_button.clicked.connect(self.apply_changes)
@@ -1041,6 +1053,46 @@ class DatSprTab(QWidget):
             self.show_preview_at_index(self.current_preview_index)
         else:
             print(f"DEBUG: Índice calculado {final_index} fora do range {len(current_sprites)}")
+            
+            
+    # Adicione estes métodos dentro da classe DatSprTab
+
+    def open_slicer(self):
+        if not self.spr:
+            QMessageBox.warning(self, "Aviso", "Carregue um arquivo .spr primeiro.")
+            return
+
+        self.slicer_win = SliceWindow()
+        # Conecta o sinal da janela Slicer ao método que processa as sprites
+        self.slicer_win.sprites_imported.connect(self.handle_slicer_import)
+        self.slicer_win.show()
+
+    def handle_slicer_import(self, sprite_list):
+        if not self.spr or not sprite_list:
+            return
+            
+        count = 0
+        try:
+            # Encontra o último ID
+            last_id = self.spr.sprite_count
+            
+            for pil_img in sprite_list:
+                new_id = last_id + 1
+                # Usa o método existente replace_sprite que já lida com expansão do arquivo
+                self.spr.replace_sprite(new_id, pil_img)
+                last_id = new_id
+                count += 1
+            
+            self.refresh_sprite_list()
+            self.status_label.setText(f"{count} sprites importadas do Slicer com sucesso.")
+            self.status_label.setStyleSheet("color: #90ee90;") # Light green
+            
+            # Vai para a última página para mostrar as novas sprites
+            self.sprite_page = (self.spr.sprite_count - 1) // self.sprites_per_page
+            self.refresh_sprite_list()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erro na Importação", f"Falha ao importar sprites: {e}")
 
         
          
