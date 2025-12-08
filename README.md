@@ -4,7 +4,7 @@ Editor spr and dat, upscale images and resizes.
 Warning: Project is still EXPERIMENTAL – expect bugs, freezes and occasional crashes.
 #   ---------- NEW INTERFACE ----------
 
-<img width="1917" height="1036" alt="Screenshot_1" src="https://github.com/user-attachments/assets/bc95a365-b253-4524-9f07-acf1d6b62029" />
+<img width="1919" height="1040" alt="Screenshot_2" src="https://github.com/user-attachments/assets/237c2464-cded-4f81-a7e7-6cdae3c6f865" />
 
 
 <img width="1919" height="1042" alt="Screenshot_2" src="https://github.com/user-attachments/assets/dce9deee-b36d-419c-8302-6641790b81d1" />
@@ -30,6 +30,7 @@ Features:
     - Mirror Horizontal
     - Color Adjust
     - Rotation
+  - Import Spr
  
 - Spr/Dat Editor (EXPERIMENTAL)
   - Edit Item/Outfit/Missile/Effects
@@ -47,7 +48,7 @@ Features:
 #   ---------- Required ----------
 
 - Python 3.10+
-  - py -m pip install pillow customtkinter numpy nuitka
+  - py -m pip install pillow PyQt6 numpy nuitka
   - https://github.com/lltcggie/waifu2x-caffe/releases/tag/1.2.0.4
 
 
