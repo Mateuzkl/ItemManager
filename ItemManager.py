@@ -14,7 +14,6 @@ data_path = os.path.join(base_path, "data")
 if data_path not in sys.path:
     sys.path.append(data_path)
 
-from ImageUpscale import ImageUpscaleTab 
 from otbReload import OtbReloadTab
 from datspr import DatSprTab
 
@@ -40,19 +39,12 @@ class App(QMainWindow):
 
         self.tab_view = QTabWidget()
         layout.addWidget(self.tab_view)
-
-        # tab 2
-        self.tab_manager = QWidget()
-        self.tab_view.addTab(self.tab_manager, "Sprite Editor")
-        manager_layout = QVBoxLayout(self.tab_manager)
-        self.upscale_module = ImageUpscaleTab(self.tab_manager, base_path)
-        manager_layout.addWidget(self.upscale_module)
         
-        # tab 2
+        # tab 1
         self.datspr_module = DatSprTab()
         self.tab_view.addTab(self.datspr_module, "Spr/Dat Editor")
 
-        # tab 3
+        # tab 2
         self.tab_otbreload = QWidget()
         self.tab_view.addTab(self.tab_otbreload, "Otb Reload")
         
