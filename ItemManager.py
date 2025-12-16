@@ -14,6 +14,10 @@ else:
 data_path = os.path.join(base_path, "data")
 if data_path not in sys.path:
     sys.path.append(data_path)
+    
+assets_path = os.path.join(base_path, "assets/images")
+if assets_path not in sys.path:
+    sys.path.append(assets_path)    
 
 from otbReload import OtbReloadTab
 from datspr import DatSprTab
@@ -26,7 +30,7 @@ class App(QMainWindow):
         
         self.resize(900, 1000)
         
-        icon_path = os.path.join(data_path, "ItemManagerIco.ico")
+        icon_path = os.path.join(assets_path, "ItemManagerIco.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
@@ -80,7 +84,7 @@ if __name__ == "__main__":
     
     set_dark_theme(app)
 
-    splash_path = os.path.join(data_path, "ItemManagersplash.png")  
+    splash_path = os.path.join(assets_path, "ItemManagersplash.png")  
     splash_pixmap = QPixmap(splash_path)
 
     if not splash_pixmap.isNull():
