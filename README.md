@@ -73,3 +73,8 @@ Warning: Project is still EXPERIMENTAL – expect bugs, freezes and occasional c
   - Extension .itm (Item Manager)
   - Support Assets (Canary)
   - Spell Maker   (Maybe)
+
+
+
+  ! NEED HELP????
+  https://github.com/gilfernandes234/ItemManager/wiki
