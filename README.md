@@ -5,7 +5,7 @@ Warning: Project is still EXPERIMENTAL – expect bugs, freezes and occasional c
 
 #   ---------- INTERFACE ----------
 
-Features:<img width="1919" height="1043" alt="Screenshot_1" src="https://github.com/user-attachments/assets/295cc19b-dc71-46d7-9474-e6673095f9e1" />
+<img width="1919" height="1043" alt="Screenshot_1" src="https://github.com/user-attachments/assets/295cc19b-dc71-46d7-9474-e6673095f9e1" />
 
 <img width="1919" height="1041" alt="Screenshot_2" src="https://github.com/user-attachments/assets/d40eb06e-73ae-47a5-93b3-4bf167f04794" />
 
@@ -18,6 +18,7 @@ Features:<img width="1919" height="1043" alt="Screenshot_1" src="https://github.
 
 <img width="1242" height="957" alt="Screenshot_5" src="https://github.com/user-attachments/assets/9983b2ec-93a7-4a7f-85e1-8e48eaa65502" />
 
+#Features:
 
 - Support
   - Transparency 
