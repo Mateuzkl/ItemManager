@@ -25,7 +25,8 @@ Features:
   - Import
   - Export
   
-- LookType Generator 
+- NPC XML Generator 
+- Monster XML Generator 
 
 - Sprite Editor
   - Upscale: 2, 4, 8
@@ -59,5 +60,4 @@ Features:
   - Extension .obd (Object Builder)
   - Extension .itm (Item Manager)
   - Support Assets (Canary)
-  - Monster Maker (Maybe)
   - Spell Maker   (Maybe)
