@@ -1067,6 +1067,8 @@ class DatSprTab(QWidget):
         self.sprite_thumbs = {}
         self.build_ui()
         self.build_loading_overlay()
+        
+        
 
     def build_ui(self):
         main_layout = QVBoxLayout(self)
@@ -1387,6 +1389,10 @@ class DatSprTab(QWidget):
         self.optimizer_button = QPushButton("Sprite Optimizer")
         self.optimizer_button.clicked.connect(self.open_optimizer)
         id_operations_frame.addWidget(self.optimizer_button)
+        
+        self.looktype_gen_button = QPushButton("LookType Generator")
+        self.looktype_gen_button.clicked.connect(self.open_looktype_generator)
+        id_operations_frame.addWidget(self.looktype_gen_button)        
 
         bottom_frame.addLayout(id_operations_frame)
 
@@ -1418,6 +1424,23 @@ class DatSprTab(QWidget):
         self.id_buttons = {}
         self.ids_per_page = 1000
         self.current_page = 0
+        
+        
+    def open_looktype_generator(self):
+        if not self.spr or not self.editor:
+            QMessageBox.warning(
+                self, "Warning", "Upload the DAT and SPR files first.."
+            )
+            return
+        
+        from looktype_generator import LookTypeGeneratorWindow
+        
+        self.looktype_win = LookTypeGeneratorWindow(
+            spr_editor=self.spr,
+            dat_editor=self.editor,
+            parent=self
+        )
+        self.looktype_win.show()        
 
     def on_toggle_addon1(self, checked):
         
