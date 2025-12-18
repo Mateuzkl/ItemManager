@@ -5,13 +5,15 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QSpinBox, QPushButton, QTextEdit, QWidget, QApplication,
     QGridLayout, QFrame, QComboBox, QFileDialog, QCheckBox, QLineEdit,
-    QMessageBox
+    QMessageBox, QTabWidget, QTableWidget, QTableWidgetItem, QSplitter
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap, QClipboard
+from PyQt6.QtGui import QPixmap, QClipboard, QSyntaxHighlighter, QTextCharFormat, QColor, QFont
 from PIL import Image
 import os
 import struct
+import re
+
 
 
 def prettify_xml(elem):
@@ -73,6 +75,581 @@ class XMLLoader:
             print(f"Erro ao carregar mounts.xml: {e}")
         
         return mounts
+        
+        
+
+
+class LuaSyntaxHighlighter(QSyntaxHighlighter):
+    """Syntax highlighting para scripts Lua"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        # Regras de highlighting
+        self.highlighting_rules = []
+        
+        # Keywords Lua
+        keyword_format = QTextCharFormat()
+        keyword_format.setForeground(QColor("#569cd6"))
+        keyword_format.setFontWeight(QFont.Weight.Bold)
+        keywords = [
+            'local', 'function', 'end', 'if', 'then', 'else', 'elseif',
+            'for', 'while', 'do', 'return', 'break', 'not', 'and', 'or'
+        ]
+        for word in keywords:
+            pattern = f"\\b{word}\\b"
+            self.highlighting_rules.append((re.compile(pattern), keyword_format))
+        
+        # Funções Tibia NPC
+        tibia_format = QTextCharFormat()
+        tibia_format.setForeground(QColor("#4ec9b0"))
+        tibia_functions = [
+            'KeywordHandler', 'NpcHandler', 'StdModule', 'FocusModule',
+            'onCreatureAppear', 'onCreatureDisappear', 'onCreatureSay', 'onThink'
+        ]
+        for func in tibia_functions:
+            pattern = f"\\b{func}\\b"
+            self.highlighting_rules.append((re.compile(pattern), tibia_format))
+        
+        # Strings
+        string_format = QTextCharFormat()
+        string_format.setForeground(QColor("#ce9178"))
+        self.highlighting_rules.append((re.compile(r"'[^']*'"), string_format))
+        self.highlighting_rules.append((re.compile(r'"[^"]*"'), string_format))
+        
+        # Comentários
+        comment_format = QTextCharFormat()
+        comment_format.setForeground(QColor("#6a9955"))
+        comment_format.setFontItalic(True)
+        self.highlighting_rules.append((re.compile(r'--[^\n]*'), comment_format))
+    
+    def highlightBlock(self, text):
+        for pattern, format in self.highlighting_rules:
+            for match in pattern.finditer(text):
+                self.setFormat(match.start(), match.end() - match.start(), format)
+
+class NPCManager(QWidget):
+    """Widget de gerenciamento de NPCs"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.npcs_data = []
+        self.current_npc = None
+        self.scripts_cache = {}
+        self.setup_ui()
+    
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # Botões de ação
+        action_layout = QHBoxLayout()
+        self.load_npcs_btn = QPushButton("🔄 Load NPCs")
+        self.load_npcs_btn.clicked.connect(self.load_all_npcs)
+        
+        self.new_npc_btn = QPushButton("➕ New NPC")
+        self.new_npc_btn.clicked.connect(self.create_new_npc)
+        
+        self.save_npc_btn = QPushButton("💾 Save NPC")
+        self.save_npc_btn.clicked.connect(self.save_current_npc)
+        self.save_npc_btn.setEnabled(False)
+        
+        self.delete_npc_btn = QPushButton("🗑️ Delete NPC")
+        self.delete_npc_btn.clicked.connect(self.delete_npc)
+        self.delete_npc_btn.setEnabled(False)
+        
+        action_layout.addWidget(self.load_npcs_btn)
+        action_layout.addWidget(self.new_npc_btn)
+        action_layout.addWidget(self.save_npc_btn)
+        action_layout.addWidget(self.delete_npc_btn)
+        action_layout.addStretch()
+        
+        layout.addLayout(action_layout)
+        
+        # Splitter horizontal: Lista NPCs | Editor
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # Lista de NPCs
+        npc_list_widget = QWidget()
+        npc_list_layout = QVBoxLayout(npc_list_widget)
+        
+        # Campo de busca
+        search_layout = QHBoxLayout()
+        search_label = QLabel("🔍 Search:")
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Filter NPCs...")
+        self.search_input.textChanged.connect(self.filter_npcs)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.search_input)
+        npc_list_layout.addLayout(search_layout)
+        
+        # Tabela de NPCs
+        self.npc_table = QTableWidget()
+        self.npc_table.setColumnCount(4)
+        self.npc_table.setHorizontalHeaderLabels(["Name", "Script", "Looktype", "Location"])
+        self.npc_table.horizontalHeader().setStretchLastSection(True)
+        self.npc_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.npc_table.itemSelectionChanged.connect(self.on_npc_selected)
+        npc_list_layout.addWidget(self.npc_table)
+        
+        splitter.addWidget(npc_list_widget)
+        
+        # Editor de NPC
+        editor_widget = QWidget()
+        editor_layout = QVBoxLayout(editor_widget)
+        
+        # Abas do editor
+        self.editor_tabs = QTabWidget()
+        
+        # Aba 1: Informações básicas
+        info_tab = QWidget()
+        info_layout = QGridLayout(info_tab)
+        
+        row = 0
+        self.npc_fields = {}
+        
+        fields_config = [
+            ('name', 'Name:', QLineEdit, ''),
+            ('script', 'Script File:', QLineEdit, '.lua'),
+            ('walkinterval', 'Walk Interval:', QSpinBox, 2000),
+            ('floorchange', 'Floor Change:', QSpinBox, 0),
+            ('speechbubble', 'Speech Bubble:', QSpinBox, 3),
+            ('health_now', 'Health Now:', QSpinBox, 100),
+            ('health_max', 'Health Max:', QSpinBox, 100),
+        ]
+        
+        for field_name, label_text, widget_class, default_val in fields_config:
+            label = QLabel(label_text)
+            label.setAlignment(Qt.AlignmentFlag.AlignRight)
+            
+            if widget_class == QLineEdit:
+                widget = QLineEdit()
+                widget.setText(str(default_val))
+            else:  # QSpinBox
+                widget = QSpinBox()
+                widget.setRange(0, 999999)
+                widget.setValue(int(default_val))
+            
+            self.npc_fields[field_name] = widget
+            info_layout.addWidget(label, row, 0)
+            info_layout.addWidget(widget, row, 1)
+            row += 1
+        
+        # Template de script
+        template_layout = QHBoxLayout()
+        template_label = QLabel("Script Template:")
+        template_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.template_combo = QComboBox()
+        self.template_combo.addItems([
+            "Blank",
+            "Bless Seller",
+            "Shop (Buy/Sell)",
+            "Quest Giver",
+            "Teleporter",
+            "Bank",
+            "Custom Dialog"
+        ])
+        self.template_combo.currentIndexChanged.connect(self.apply_script_template)
+        
+        template_layout.addWidget(template_label)
+        template_layout.addWidget(self.template_combo, 1)
+        info_layout.addLayout(template_layout, row, 0, 1, 2)
+        
+        info_layout.setRowStretch(row + 1, 1)
+        self.editor_tabs.addTab(info_tab, "📋 Info")
+        
+        # Aba 2: Script Lua
+        script_tab = QWidget()
+        script_layout = QVBoxLayout(script_tab)
+        
+        self.script_editor = QTextEdit()
+        self.script_editor.setStyleSheet(
+            "background-color: #1e1e1e; color: #d4d4d4; "
+            "font-family: 'Consolas', 'Courier New', monospace; font-size: 10pt;"
+        )
+        self.highlighter = LuaSyntaxHighlighter(self.script_editor.document())
+        
+        script_layout.addWidget(self.script_editor)
+        self.editor_tabs.addTab(script_tab, "📜 Script")
+        
+        editor_layout.addWidget(self.editor_tabs)
+        splitter.addWidget(editor_widget)
+        
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
+        
+        layout.addWidget(splitter)
+    
+    def load_all_npcs(self):
+        """Carrega todos os NPCs da pasta assets/xml/npc/"""
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        base_dir = os.path.dirname(current_dir)
+        npc_dir = os.path.join(base_dir, 'assets', 'xml', 'npc')
+        
+        if not os.path.exists(npc_dir):
+            QMessageBox.warning(self, "Warning", f"NPC directory not found:\n{npc_dir}")
+            return
+        
+        self.npcs_data.clear()
+        self.npc_table.setRowCount(0)
+        
+        # Escaneia todos os arquivos XML
+        for filename in os.listdir(npc_dir):
+            if filename.endswith('.xml'):
+                xml_path = os.path.join(npc_dir, filename)
+                try:
+                    tree = ET.parse(xml_path)
+                    root = tree.getroot()
+                    
+                    if root.tag == 'npc':
+                        npc_data = {
+                            'filename': filename,
+                            'filepath': xml_path,
+                            'name': root.get('name', ''),
+                            'script': root.get('script', ''),
+                            'walkinterval': int(root.get('walkinterval', 2000)),
+                            'floorchange': int(root.get('floorchange', 0)),
+                            'speechbubble': int(root.get('speechbubble', 3)),
+                        }
+                        
+                        # Health
+                        health = root.find('health')
+                        if health is not None:
+                            npc_data['health_now'] = int(health.get('now', 100))
+                            npc_data['health_max'] = int(health.get('max', 100))
+                        
+                        # Look
+                        look = root.find('look')
+                        if look is not None:
+                            npc_data['looktype'] = int(look.get('type', 0))
+                            npc_data['head'] = int(look.get('head', 0))
+                            npc_data['body'] = int(look.get('body', 0))
+                            npc_data['legs'] = int(look.get('legs', 0))
+                            npc_data['feet'] = int(look.get('feet', 0))
+                            npc_data['addons'] = int(look.get('addons', 0))
+                            npc_data['mount'] = int(look.get('mount', 0))
+                        
+                        self.npcs_data.append(npc_data)
+                        
+                        # Adiciona na tabela
+                        row = self.npc_table.rowCount()
+                        self.npc_table.insertRow(row)
+                        self.npc_table.setItem(row, 0, QTableWidgetItem(npc_data['name']))
+                        self.npc_table.setItem(row, 1, QTableWidgetItem(npc_data['script']))
+                        self.npc_table.setItem(row, 2, QTableWidgetItem(str(npc_data.get('looktype', 'N/A'))))
+                        self.npc_table.setItem(row, 3, QTableWidgetItem(filename))
+                
+                except Exception as e:
+                    print(f"Error loading {filename}: {e}")
+        
+        QMessageBox.information(self, "Success", f"Loaded {len(self.npcs_data)} NPCs")
+    
+    def filter_npcs(self, text):
+        """Filtra NPCs na tabela"""
+        for row in range(self.npc_table.rowCount()):
+            match = False
+            for col in range(self.npc_table.columnCount()):
+                item = self.npc_table.item(row, col)
+                if item and text.lower() in item.text().lower():
+                    match = True
+                    break
+            self.npc_table.setRowHidden(row, not match)
+    
+    def on_npc_selected(self):
+        """Quando um NPC é selecionado na tabela"""
+        selected = self.npc_table.selectedItems()
+        if not selected:
+            return
+        
+        row = selected[0].row()
+        if row >= len(self.npcs_data):
+            return
+        
+        self.current_npc = self.npcs_data[row]
+        self.load_npc_to_editor(self.current_npc)
+        self.save_npc_btn.setEnabled(True)
+        self.delete_npc_btn.setEnabled(True)
+    
+    def load_npc_to_editor(self, npc_data):
+        """Carrega dados do NPC no editor"""
+        # Preenche campos
+        self.npc_fields['name'].setText(npc_data.get('name', ''))
+        self.npc_fields['script'].setText(npc_data.get('script', ''))
+        self.npc_fields['walkinterval'].setValue(npc_data.get('walkinterval', 2000))
+        self.npc_fields['floorchange'].setValue(npc_data.get('floorchange', 0))
+        self.npc_fields['speechbubble'].setValue(npc_data.get('speechbubble', 3))
+        self.npc_fields['health_now'].setValue(npc_data.get('health_now', 100))
+        self.npc_fields['health_max'].setValue(npc_data.get('health_max', 100))
+        
+        # Carrega script Lua
+        script_name = npc_data.get('script', '')
+        if script_name:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            base_dir = os.path.dirname(current_dir)
+            script_path = os.path.join(base_dir, 'assets', 'xml', 'npc', 'scripts', script_name)
+            
+            if os.path.exists(script_path):
+                try:
+                    with open(script_path, 'r', encoding='utf-8') as f:
+                        script_content = f.read()
+                        self.script_editor.setPlainText(script_content)
+                        self.scripts_cache[script_name] = script_content
+                except Exception as e:
+                    self.script_editor.setPlainText(f"-- Error loading script: {e}")
+            else:
+                self.script_editor.setPlainText("-- Script file not found")
+    
+    def create_new_npc(self):
+        """Cria um novo NPC"""
+        self.current_npc = None
+        
+        # Limpa campos
+        self.npc_fields['name'].setText("New NPC")
+        self.npc_fields['script'].setText("new_npc.lua")
+        self.npc_fields['walkinterval'].setValue(2000)
+        self.npc_fields['floorchange'].setValue(0)
+        self.npc_fields['speechbubble'].setValue(3)
+        self.npc_fields['health_now'].setValue(100)
+        self.npc_fields['health_max'].setValue(100)
+        
+        self.script_editor.clear()
+        self.save_npc_btn.setEnabled(True)
+    
+    def apply_script_template(self, index):
+        """Aplica template de script"""
+        templates = {
+            0: "",  # Blank
+            1: self.get_bless_template(),
+            2: self.get_shop_template(),
+            3: self.get_quest_template(),
+            4: self.get_teleport_template(),
+            5: self.get_bank_template(),
+            6: self.get_dialog_template(),
+        }
+        
+        template = templates.get(index, "")
+        if template:
+            self.script_editor.setPlainText(template)
+    
+    def get_bless_template(self):
+        """Template de vendedor de bênçãos"""
+        return """local keywordHandler = KeywordHandler:new()
+local npcHandler = NpcHandler:new(keywordHandler)
+NpcSystem.parseParameters(npcHandler)
+
+function onCreatureAppear(cid) npcHandler:onCreatureAppear(cid) end
+function onCreatureDisappear(cid) npcHandler:onCreatureDisappear(cid) end
+function onCreatureSay(cid, type, msg) npcHandler:onCreatureSay(cid, type, msg) end
+function onThink() npcHandler:onThink() end
+
+local blessCost = 10000
+
+for i = 1, 5 do
+    local node = keywordHandler:addKeyword({'bless ' .. i}, StdModule.say, {
+        npcHandler = npcHandler,
+        onlyFocus = true,
+        text = 'Do you want to buy blessing ' .. i .. ' for ' .. blessCost .. ' gold?'
+    })
+    
+    node:addChildKeyword({'yes'}, StdModule.bless, {
+        npcHandler = npcHandler,
+        bless = i,
+        premium = true,
+        cost = blessCost
+    })
+    
+    node:addChildKeyword({'no'}, StdModule.say, {
+        npcHandler = npcHandler,
+        onlyFocus = true,
+        reset = true,
+        text = 'Too expensive, eh?'
+    })
+end
+
+npcHandler:addModule(FocusModule:new())"""
+    
+    def get_shop_template(self):
+        return """local keywordHandler = KeywordHandler:new()
+local npcHandler = NpcHandler:new(keywordHandler)
+NpcSystem.parseParameters(npcHandler)
+
+function onCreatureAppear(cid) npcHandler:onCreatureAppear(cid) end
+function onCreatureDisappear(cid) npcHandler:onCreatureDisappear(cid) end
+function onCreatureSay(cid, type, msg) npcHandler:onCreatureSay(cid, type, msg) end
+function onThink() npcHandler:onThink() end
+
+-- Shop items
+local shopModule = ShopModule:new()
+npcHandler:addModule(shopModule)
+
+shopModule:addBuyableItem({'health potion'}, 7618, 50, 'health potion')
+shopModule:addBuyableItem({'mana potion'}, 7620, 50, 'mana potion')
+
+shopModule:addSellableItem({'sword'}, 2376, 35, 'sword')
+
+npcHandler:addModule(FocusModule:new())"""
+    
+    def get_quest_template(self):
+        return """local keywordHandler = KeywordHandler:new()
+local npcHandler = NpcHandler:new(keywordHandler)
+NpcSystem.parseParameters(npcHandler)
+
+function onCreatureAppear(cid) npcHandler:onCreatureAppear(cid) end
+function onCreatureDisappear(cid) npcHandler:onCreatureDisappear(cid) end
+function onCreatureSay(cid, type, msg) npcHandler:onCreatureSay(cid, type, msg) end
+function onThink() npcHandler:onThink() end
+
+function greetCallback(cid)
+    return true
+end
+
+-- Quest keywords
+keywordHandler:addKeyword({'quest'}, StdModule.say, {
+    npcHandler = npcHandler,
+    onlyFocus = true,
+    text = 'I have a quest for you!'
+})
+
+npcHandler:setCallback(CALLBACK_GREET, greetCallback)
+npcHandler:addModule(FocusModule:new())"""
+    
+    def get_teleport_template(self):
+        return """local keywordHandler = KeywordHandler:new()
+local npcHandler = NpcHandler:new(keywordHandler)
+NpcSystem.parseParameters(npcHandler)
+
+function onCreatureAppear(cid) npcHandler:onCreatureAppear(cid) end
+function onCreatureDisappear(cid) npcHandler:onCreatureDisappear(cid) end
+function onCreatureSay(cid, type, msg) npcHandler:onCreatureSay(cid, type, msg) end
+function onThink() npcHandler:onThink() end
+
+local travelNode = keywordHandler:addKeyword({'travel'}, StdModule.say, {
+    npcHandler = npcHandler,
+    onlyFocus = true,
+    text = 'Where do you want to go? {Thais} or {Carlin}?'
+})
+
+travelNode:addChildKeyword({'thais'}, StdModule.travel, {
+    npcHandler = npcHandler,
+    premium = false,
+    cost = 100,
+    destination = {x=1000, y=1000, z=7}
+})
+
+npcHandler:addModule(FocusModule:new())"""
+    
+    def get_bank_template(self):
+        return """local keywordHandler = KeywordHandler:new()
+local npcHandler = NpcHandler:new(keywordHandler)
+NpcSystem.parseParameters(npcHandler)
+
+function onCreatureAppear(cid) npcHandler:onCreatureAppear(cid) end
+function onCreatureDisappear(cid) npcHandler:onCreatureDisappear(cid) end
+function onCreatureSay(cid, type, msg) npcHandler:onCreatureSay(cid, type, msg) end
+function onThink() npcHandler:onThink() end
+
+keywordHandler:addKeyword({'balance'}, StdModule.balance)
+keywordHandler:addKeyword({'deposit'}, StdModule.deposit)
+keywordHandler:addKeyword({'withdraw'}, StdModule.withdraw)
+
+npcHandler:addModule(FocusModule:new())"""
+    
+    def get_dialog_template(self):
+        return """local keywordHandler = KeywordHandler:new()
+local npcHandler = NpcHandler:new(keywordHandler)
+NpcSystem.parseParameters(npcHandler)
+
+function onCreatureAppear(cid) npcHandler:onCreatureAppear(cid) end
+function onCreatureDisappear(cid) npcHandler:onCreatureDisappear(cid) end
+function onCreatureSay(cid, type, msg) npcHandler:onCreatureSay(cid, type, msg) end
+function onThink() npcHandler:onThink() end
+
+-- Custom dialog
+keywordHandler:addKeyword({'hello'}, StdModule.say, {
+    npcHandler = npcHandler,
+    onlyFocus = true,
+    text = 'Welcome, traveler!'
+})
+
+npcHandler:addModule(FocusModule:new())"""
+    
+    def save_current_npc(self):
+        """Salva o NPC atual"""
+        name = self.npc_fields['name'].text()
+        script = self.npc_fields['script'].text()
+        
+        if not name or not script:
+            QMessageBox.warning(self, "Warning", "Name and script filename are required!")
+            return
+        
+        # Diretórios
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        base_dir = os.path.dirname(current_dir)
+        npc_dir = os.path.join(base_dir, 'assets', 'xml', 'npc')
+        scripts_dir = os.path.join(npc_dir, 'scripts')
+        
+        # Cria diretórios se não existirem
+        os.makedirs(npc_dir, exist_ok=True)
+        os.makedirs(scripts_dir, exist_ok=True)
+        
+        # Salva XML
+        xml_filename = f"{name.lower().replace(' ', '_')}.xml"
+        xml_path = os.path.join(npc_dir, xml_filename)
+        
+        npc_elem = ET.Element('npc')
+        npc_elem.set('name', name)
+        npc_elem.set('script', script)
+        npc_elem.set('walkinterval', str(self.npc_fields['walkinterval'].value()))
+        npc_elem.set('floorchange', str(self.npc_fields['floorchange'].value()))
+        npc_elem.set('speechbubble', str(self.npc_fields['speechbubble'].value()))
+        
+        health = ET.SubElement(npc_elem, 'health')
+        health.set('now', str(self.npc_fields['health_now'].value()))
+        health.set('max', str(self.npc_fields['health_max'].value()))
+        
+        # Salva XML formatado
+        from xml.dom import minidom
+        rough_string = ET.tostring(npc_elem, encoding='unicode')
+        reparsed = minidom.parseString(rough_string)
+        pretty_xml = reparsed.toprettyxml(indent="  ").split('\n', 1)[1]
+        
+        with open(xml_path, 'w', encoding='utf-8') as f:
+            f.write(pretty_xml)
+        
+        # Salva script Lua
+        script_path = os.path.join(scripts_dir, script)
+        script_content = self.script_editor.toPlainText()
+        
+        with open(script_path, 'w', encoding='utf-8') as f:
+            f.write(script_content)
+        
+        QMessageBox.information(self, "Success", f"NPC saved:\n{xml_path}\n{script_path}")
+        self.load_all_npcs()
+    
+    def delete_npc(self):
+        """Deleta o NPC selecionado"""
+        if not self.current_npc:
+            return
+        
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            f"Delete NPC '{self.current_npc['name']}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                # Remove XML
+                if os.path.exists(self.current_npc['filepath']):
+                    os.remove(self.current_npc['filepath'])
+                
+                # Remove script (opcional)
+                script_path = self.current_npc['filepath'].replace('.xml', '').replace('npc', 'npc/scripts') + f"/{self.current_npc['script']}"
+                if os.path.exists(script_path):
+                    os.remove(script_path)
+                
+                QMessageBox.information(self, "Success", "NPC deleted")
+                self.load_all_npcs()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to delete NPC:\n{e}")
+        
 
 
 class ColorPicker(QWidget):
@@ -200,6 +777,15 @@ class LookTypeGeneratorWindow(QDialog):
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(10)
         
+        # Cria o QTabWidget principal
+        self.main_tabs = QTabWidget()
+
+        # ============================================
+        # Aba 1: Editor de LookType
+        # ============================================
+        looktype_tab = QWidget()
+        looktype_layout = QVBoxLayout(looktype_tab)  # Layout da aba
+
         # Grupo de carregamento de XMLs
         xml_load_group = QGroupBox("Load XML Files")
         xml_load_layout = QHBoxLayout()
@@ -221,7 +807,7 @@ class LookTypeGeneratorWindow(QDialog):
         xml_load_layout.addWidget(self.mount_xml_label, 1)
         
         xml_load_group.setLayout(xml_load_layout)
-        main_layout.addWidget(xml_load_group)
+        looktype_layout.addWidget(xml_load_group)  # ← Mudou de main_layout para looktype_layout
         
         # Grupo NPC Info
         npc_group = QGroupBox("NPC Information")
@@ -256,7 +842,7 @@ class LookTypeGeneratorWindow(QDialog):
             row += 1
         
         npc_group.setLayout(npc_layout)
-        main_layout.addWidget(npc_group)
+        looktype_layout.addWidget(npc_group)  # ← Mudou de main_layout para looktype_layout
         
         # Grupo LookType
         looktype_group = QGroupBox("LookType Configuration")
@@ -393,7 +979,7 @@ class LookTypeGeneratorWindow(QDialog):
         mount_id_layout.addStretch()
         right_col.addLayout(mount_id_layout)
         
-       
+        # Preview container
         preview_container = QVBoxLayout()
 
         # Título
@@ -457,11 +1043,10 @@ class LookTypeGeneratorWindow(QDialog):
 
         right_col.addLayout(preview_container)
         right_col.addStretch()
-
         
         looktype_main.addLayout(right_col)
         looktype_group.setLayout(looktype_main)
-        main_layout.addWidget(looktype_group)
+        looktype_layout.addWidget(looktype_group)  # ← Mudou de main_layout para looktype_layout
         
         # Grupo XML Output
         xml_group = QGroupBox("XML Output")
@@ -476,7 +1061,7 @@ class LookTypeGeneratorWindow(QDialog):
         xml_layout.addWidget(self.xml_display)
         
         xml_group.setLayout(xml_layout)
-        main_layout.addWidget(xml_group)
+        looktype_layout.addWidget(xml_group)  # ← Mudou de main_layout para looktype_layout
         
         # Botões
         button_layout = QHBoxLayout()
@@ -497,13 +1082,24 @@ class LookTypeGeneratorWindow(QDialog):
         self.close_btn.clicked.connect(self.close)
         button_layout.addWidget(self.close_btn)
         
-        main_layout.addLayout(button_layout)
+        looktype_layout.addLayout(button_layout)  # ← Mudou de main_layout para looktype_layout
+        
+        # ============================================
+        # Adiciona as abas ao TabWidget
+        # ============================================
+        self.main_tabs.addTab(looktype_tab, "👤 LookType Editor")
+        
+        # Aba 2: NPC Manager
+        self.npc_manager = NPCManager()
+        self.main_tabs.addTab(self.npc_manager, "📂 NPC Manager")
+
+        # Adiciona o TabWidget ao layout principal da janela
+        main_layout.addWidget(self.main_tabs)
         
         # Inicializa combos vazios
         self.outfit_combo.addItem("(No outfit selected)", 0)
         self.mount_combo.addItem("(No mount)", 0)
-        
-        
+
         
     def auto_load_xml_files(self):
         """Busca e carrega automaticamente os arquivos XML da pasta assets"""
@@ -973,4 +1569,4 @@ class LookTypeGeneratorWindow(QDialog):
             
         except Exception as e:
             print(f"Erro ao fazer parse do XML: {e}")
-            QMessageBox.warning(self, "Paste Error", f"Failed to parse XML:\n{e}")
+            QMessageBox.warning(self, "Paste Error", f"Failed to parse XML:\n{e}")                  
