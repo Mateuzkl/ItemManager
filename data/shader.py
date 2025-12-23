@@ -10,9 +10,9 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QTextEdit, QVBoxLayout,
                                
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtOpenGL import QOpenGLShader, QOpenGLShaderProgram, QOpenGLTexture
-from PyQt6.QtCore import Qt, QTimer, QRegularExpression
+from PyQt6.QtCore import Qt, QTimer, QRegularExpression, QSize, QRect
 from OpenGL import GL
-from PyQt6.QtGui import QImage, QPixmap, QSyntaxHighlighter, QTextCharFormat, QFont, QColor
+from PyQt6.QtGui import QImage, QPixmap, QSyntaxHighlighter, QTextCharFormat, QFont, QColor, QPainter, QTextFormat
 
 from pathlib import Path
 import qdarktheme  
@@ -554,7 +554,139 @@ class GLSLHighlighter(QSyntaxHighlighter):
             
             self.setFormat(start_index, comment_length, self.multiline_comment_format)
             start_index = self.comment_start_expression.match(text, start_index + comment_length).capturedStart()
+  
+class LineNumberArea(QWidget):
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.codeeditor = editor
+
+    def sizeHint(self):
+        return QSize(self.codeeditor.linenumberareawidth(), 0)
+
+    def paintEvent(self, event):
+        self.codeeditor.linenumberareapaintevent(event)
+
+
+class CodeEditor(QTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.linenumberarea = LineNumberArea(self)
         
+        # Conecta sinais
+        self.document().blockCountChanged.connect(self.updatelinenumberareawidth)
+        self.verticalScrollBar().valueChanged.connect(self.updatelinenumberarea_scroll)
+        self.textChanged.connect(self.updatelinenumberarea_content)
+        self.cursorPositionChanged.connect(self.highlightcurrentline)
+        
+        self.updatelinenumberareawidth(0)
+        self.highlightcurrentline()
+    
+    def linenumberareawidth(self):
+        """Calcula a largura necessária para os números de linha"""
+        digits = 1
+        max_num = max(1, self.document().blockCount())
+        while max_num >= 10:
+            max_num //= 10
+            digits += 1
+        
+        space = 10 + self.fontMetrics().horizontalAdvance('9') * digits
+        return space
+    
+    def updatelinenumberareawidth(self, _):
+
+        self.setViewportMargins(self.linenumberareawidth(), 0, 0, 0)
+    
+    def updatelinenumberarea_scroll(self, _):
+
+        self.linenumberarea.update()
+    
+    def updatelinenumberarea_content(self):
+
+        self.linenumberarea.update()
+    
+    def resizeEvent(self, event):
+
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self.linenumberarea.setGeometry(
+            QRect(cr.left(), cr.top(), self.linenumberareawidth(), cr.height())
+        )
+    
+    def highlightcurrentline(self):
+
+        extra_selections = []
+        
+        if not self.isReadOnly():
+            selection = QTextEdit.ExtraSelection()
+            line_color = QColor("#2d2d30")
+            
+            selection.format.setBackground(line_color)
+            selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+            extra_selections.append(selection)
+        
+        self.setExtraSelections(extra_selections)
+    
+    def linenumberareapaintevent(self, event):
+
+        painter = QPainter(self.linenumberarea)
+        painter.fillRect(event.rect(), QColor("#1e1e1e"))  #
+        
+
+        block = self.firstVisibleBlock()
+        block_number = block.blockNumber()
+        
+
+        content_offset = self.contentOffset()
+        block_geometry = self.document().documentLayout().blockBoundingRect(block)
+        top = int(block_geometry.translated(content_offset).top())
+        bottom = top + int(block_geometry.height())
+
+
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                number = str(block_number + 1)
+                
+      
+                if block_number == self.textCursor().blockNumber():
+                    painter.setPen(QColor("#ffffff"))  
+                    painter.setFont(self.font())
+                else:
+                    painter.setPen(QColor("#858585"))  
+                
+                painter.drawText(
+                    0, top,
+                    self.linenumberarea.width() - 5,
+                    self.fontMetrics().height(),
+                    Qt.AlignmentFlag.AlignRight,
+                    number
+                )
+            
+            block = block.next()
+            top = bottom
+            block_geometry = self.document().documentLayout().blockBoundingRect(block)
+            bottom = top + int(block_geometry.height())
+            block_number += 1
+    
+    def firstVisibleBlock(self):
+
+        block = self.document().firstBlock()
+        while block.isValid():
+            if block.isVisible():
+                block_geometry = self.document().documentLayout().blockBoundingRect(block)
+                if block_geometry.translated(self.contentOffset()).top() >= 0:
+                    return block
+            block = block.next()
+        return self.document().firstBlock()
+    
+    def contentOffset(self):
+        """Retorna o offset do conteúdo (scroll)"""
+        from PyQt6.QtCore import QPointF
+        vertical_offset = -self.verticalScrollBar().value()
+        horizontal_offset = -self.horizontalScrollBar().value()
+        return QPointF(horizontal_offset, vertical_offset)
+  
 class ShaderEditor(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -631,7 +763,7 @@ class ShaderEditor(QMainWindow):
         self.shader_update_timer.setSingleShot(True)
         self.shader_update_timer.timeout.connect(self.apply_shader)        
         
-        self.text_edit = QTextEdit()
+        self.text_edit = CodeEditor()
         self.text_edit.setPlainText(FRAG_DEFAULT)
         
         font = QFont("Consolas", 11) 
