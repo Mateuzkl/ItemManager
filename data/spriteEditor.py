@@ -4,6 +4,7 @@ import sys
 import uuid
 from copy import deepcopy
 
+
 from PIL import Image, ImageDraw, ImageFilter
 from PyQt6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import (
@@ -232,11 +233,10 @@ except ImportError:
 
 try:
     from rembg import remove
-
     REMBG_AVAILABLE = True
 except ImportError:
     REMBG_AVAILABLE = False
-    print("⚠️ rembg não está instalado.")
+
 
 
 class GridOverlay(QGraphicsObject):
@@ -390,6 +390,51 @@ class SelectionRectangle(QGraphicsRectItem):
         if event.button() == Qt.MouseButton.LeftButton:
             self.setCursor(Qt.CursorShape.SizeAllCursor)
         super().mouseReleaseEvent(event)
+        
+        
+class EraserOverlay(QGraphicsObject):
+
+    def __init__(self):
+        super().__init__()
+        self.size = 10
+        self.position = QPointF(0, 0)
+        self.visible = False
+        self.setZValue(100)  # Mantém sempre no topo
+        
+    def boundingRect(self):
+        radius = self.size / 2
+        return QRectF(-radius, -radius, self.size, self.size)
+    
+    def paint(self, painter, option, widget):
+        if not self.visible:
+            return
+        
+        radius = self.size / 2
+        
+        # Círculo externo (borda)
+        pen = QPen(QColor(255, 100, 100, 200), 2, Qt.PenStyle.SolidLine)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.setBrush(QBrush(QColor(255, 100, 100, 30)))
+        painter.drawEllipse(QPointF(0, 0), radius, radius)
+        
+        # Cruz central para indicar o centro exato
+        cross_size = 3
+        painter.drawLine(-cross_size, 0, cross_size, 0)
+        painter.drawLine(0, -cross_size, 0, cross_size)
+    
+    def setSize(self, size):
+        self.prepareGeometryChange()
+        self.size = size
+        self.update()
+    
+    def setVisible(self, visible):
+        self.visible = visible
+        self.update()
+    
+    def updatePosition(self, pos):
+        self.setPos(pos)
+        
 
 
 class ZoomableGraphicsView(QGraphicsView):
@@ -1282,8 +1327,14 @@ class SliceWindow(QWidget):
 
         self.scene = QGraphicsScene()
         self.scene.setBackgroundBrush(QColor(50, 50, 50))
+        
+        self.eraser_overlay = EraserOverlay()
+        self.scene.addItem(self.eraser_overlay)
+        self.eraser_overlay.setVisible(False)        
+  
 
         self.view = ZoomableGraphicsView(self.scene, self)
+        self.view.setMouseTracking(True)
         self.view.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         self.view.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
         self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
@@ -3009,38 +3060,40 @@ class SliceWindow(QWidget):
 
         QMessageBox.information(self, "Paste", f"Colado em ({x}, {y})")
 
+
+            
     def toggle_eraser_mode(self, checked):
         self.eraser_mode = checked
-
         if checked:
             if self.selection_mode:
-                self.btn_toggle_selection.setChecked(False)
+                self.btn_toggle_eraser.setChecked(False)
                 self.toggle_selection_mode(False)
             if self.paint_mode:
-                self.btn_toggle_paint.setChecked(False)
+                self.btntogglepaint.setChecked(False)
                 self.toggle_paint_mode(False)
-
             self.btn_toggle_eraser.setText("Disable Eraser")
-            self.btn_toggle_eraser.setStyleSheet(
-                "background-color: #51cf66; font-weight: bold;"
-            )
+            self.btn_toggle_eraser.setStyleSheet("background-color: #51cf66; font-weight: bold")
             self.view.setDragMode(QGraphicsView.DragMode.NoDrag)
             self.view.viewport().setCursor(Qt.CursorShape.CrossCursor)
-            self.grid_item.setFlag(
-                QGraphicsObject.GraphicsItemFlag.ItemIsMovable, False
-            )
+            self.grid_item.setFlag(QGraphicsObject.GraphicsItemFlag.ItemIsMovable, False)
+            # ATIVAR OVERLAY
+            self.eraser_overlay.setVisible(True)
+            self.eraser_overlay.setSize(self.eraser_size)
         else:
             self.btn_toggle_eraser.setText("Enable Eraser")
-            self.btn_toggle_eraser.setStyleSheet(
-                "background-color: #ff6b6b; font-weight: bold;"
-            )
+            self.btn_toggle_eraser.setStyleSheet("background-color: #ff6b6b; font-weight: bold")
             self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
             self.view.viewport().setCursor(Qt.CursorShape.ArrowCursor)
             self.grid_item.setFlag(QGraphicsObject.GraphicsItemFlag.ItemIsMovable, True)
             self.last_eraser_point = None
+            # DESATIVAR OVERLAY
+            self.eraser_overlay.setVisible(False)
+
 
     def on_eraser_size_change(self, value):
         self.eraser_size = value
+        self.eraser_overlay.setSize(value)
+
 
     def view_mouse_press(self, event):
         modifiers = QApplication.keyboardModifiers()
@@ -3095,6 +3148,10 @@ class SliceWindow(QWidget):
             QGraphicsView.mousePressEvent(self.view, event)
 
     def view_mouse_move(self, event):
+        
+        if self.eraser_mode:
+            scenepos = self.view.mapToScene(event.pos())
+            self.eraser_overlay.updatePosition(scenepos)        
         
         
         if self.cut_size_mode and self.is_drawing_cut_rect and self.cut_start_pos:
@@ -4197,4 +4254,3 @@ if __name__ == "__main__":
 
         traceback.print_exc()
         input("Pressione ENTER para fechar...")
-
