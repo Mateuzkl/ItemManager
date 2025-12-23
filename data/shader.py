@@ -564,16 +564,16 @@ class ShaderEditor(QMainWindow):
         assets_layout.addWidget(info_label)
                
         self.test_assets = {
-            "Escudo": "assets/shield.png",
-            "Espada": "assets/sword.png",
-            "Machado": "assets/axe.png",
-            "Armadura": "assets/armor.png",
-            "Outfit 1": "assets/outfit1.png",
-            "Outfit 2": "assets/outfit2.png",
-            "Tile 1": "assets/t2.png",
-            "Tile 2": "assets/t3.png",
-            "Paisagem 1": "assets/landscape1.png",
-            "Paisagem 2": "assets/landscape2.png",
+            "Escudo": str(IMAGES_DIR / "shield.png"),
+            "Espada": str(IMAGES_DIR / "sword.png"),
+            "Machado": str(IMAGES_DIR / "axe.png"),
+            "Armadura": str(IMAGES_DIR / "armor.png"),
+            "Outfit 1": str(IMAGES_DIR / "outfit1.png"),
+            "Outfit 2": str(IMAGES_DIR / "outfit2.png"),
+            "Tile 1": str(IMAGES_DIR / "t2.png"),
+            "Tile 2": str(IMAGES_DIR / "t3.png"),
+            "Paisagem 1": str(IMAGES_DIR / "landscape1.png"),
+            "Paisagem 2": str(IMAGES_DIR / "landscape2.png"),
         }
         
                     
