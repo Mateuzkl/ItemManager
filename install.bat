@@ -44,6 +44,7 @@ noise>=1.2.2
 onnxruntime ^
 rembg ^
 PyOpenGL==3.1.6
+pygame==2.5.2
 
 :: Check install result
 if errorlevel 1 (
@@ -63,3 +64,4 @@ timeout /t 8 >nul
 
 cmd /c del "%~f0"
 exit
+
