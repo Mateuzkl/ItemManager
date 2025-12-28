@@ -5,7 +5,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
 
 # Assumindo que você tem o otbparser na pasta ou no path
-from otbparser import OtbFile
+from otbParser import OtbFile
 
 # --- FLAGS (Mantidas iguais) ---
 OTB_FLAG_BLOCK_SOLID        = 1 << 0
@@ -239,3 +239,4 @@ class OtbReloadTab(QWidget):
         except Exception as e:
             self.log(f"Error during update: {str(e)}")
             QMessageBox.critical(self, "Save Error", str(e))
+
