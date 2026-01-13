@@ -45,6 +45,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QColorDialog,
     QComboBox,
+    QDialog,
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
@@ -1160,6 +1161,75 @@ class DroppablePreviewLabel(ClickableLabel):
             event.ignore()
 
 
+
+class FlagsDialog(QDialog):
+    def __init__(self, checkboxes_dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Manage Flags")
+        self.setFixedWidth(500)
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1a1a2e, stop:1 #16161f);
+                border: 2px solid #4a90e2;
+                border-radius: 10px;
+            }
+            QLabel { color: #e0e0e0; font-weight: bold; }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Grid area for flags
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("background: transparent; border: none;")
+        
+        content = QWidget()
+        content.setStyleSheet("background: transparent;")
+        grid = QGridLayout(content)
+        grid.setSpacing(10)
+        
+        INTERNAL_FLAGS = ["MarketItem"]
+        all_attr_names = sorted(REVERSE_METADATA_FLAGS.keys())
+        visible_attr_names = [n for n in all_attr_names if n not in INTERNAL_FLAGS]
+
+        cols = 2
+        for i, attr_name in enumerate(visible_attr_names):
+            row = i // cols
+            col = i % cols
+            
+            container = QWidget()
+            cont_layout = QHBoxLayout(container)
+            cont_layout.setContentsMargins(0,0,0,0)
+            cont_layout.setSpacing(10)
+            
+            # Create ToggleSwitch if not already in dict (it starts empty)
+            if attr_name not in checkboxes_dict:
+                 checkboxes_dict[attr_name] = ToggleSwitch()
+
+            toggle = checkboxes_dict[attr_name]
+            
+            label = QLabel(attr_name)
+            label.setStyleSheet("color: #cccccc; font-size: 11px;")
+            
+            cont_layout.addWidget(toggle)
+            cont_layout.addWidget(label)
+            cont_layout.addStretch()
+            
+            grid.addWidget(container, row, col)
+
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
+        
+        # Close Button
+        close_btn = QPushButton("Close")
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setStyleSheet("""
+            background: #4a90e2; color: white; border: none; padding: 8px; border-radius: 4px; font-weight: bold;
+        """)
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+
 class DatSprTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1192,9 +1262,19 @@ class DatSprTab(QWidget):
         self.sprites_per_page = 1000
         self.sprite_page = 0
         self.sprite_thumbs = {}
+        
+        self.flags_dialog = None # Initialize to None
+        
         self.build_ui()
         self.settings = QSettings("TibiaItemManager", "DatSprEditor")
         self.load_settings()
+
+    def open_flags_dialog(self):
+        if not self.flags_dialog:
+             self.flags_dialog = FlagsDialog(self.checkboxes, self)
+        self.flags_dialog.show()
+        self.flags_dialog.raise_()
+        self.flags_dialog.activateWindow()
 
     def show_options_help(self):
         msg = (
@@ -1397,6 +1477,16 @@ class DatSprTab(QWidget):
         self.delete_id_button.clicked.connect(self.delete_current_id)
         actions_layout.addWidget(self.delete_id_button)
 
+        self.delete_id_button.clicked.connect(self.delete_current_id)
+        actions_layout.addWidget(self.delete_id_button)
+
+        # Manage Flags Button (Compact UI)
+        self.flags_btn = QPushButton("🚩 Flags")
+        self.flags_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.flags_btn.setStyleSheet("font-weight: bold; color: #e0e0e0; border: 1px solid #5b9bd5; border-radius: 4px;")
+        self.flags_btn.clicked.connect(self.open_flags_dialog)
+        actions_layout.addWidget(self.flags_btn)
+
         # Apply
         self.apply_button = QPushButton("APPLY CHANGES")
         self.apply_button.setObjectName("primaryBtn")
@@ -1438,37 +1528,16 @@ class DatSprTab(QWidget):
         outfit_layout.addStretch()
         center_layout.addWidget(outfit_frame)
 
-        # Flags Section
-        flags_group = QGroupBox("🏴 Flags")
-        flags_grid = QGridLayout(flags_group)
-        flags_grid.setSpacing(15)
-
+        # Pre-initialize checkboxes for background logic (Compact Mode)
+        # We don't add them to the main layout anymore, they live in FlagsDialog
         INTERNAL_FLAGS = ["MarketItem"]
         all_attr_names = sorted(REVERSE_METADATA_FLAGS.keys())
         visible_attr_names = [n for n in all_attr_names if n not in INTERNAL_FLAGS]
 
-        cols = 2
-        for i, attr_name in enumerate(visible_attr_names):
-            row = i // cols
-            col = i % cols
-            
-            container = QWidget()
-            cont_layout = QHBoxLayout(container)
-            cont_layout.setContentsMargins(0,0,0,0)
-            cont_layout.setSpacing(8)
-            
-            toggle = ToggleSwitch()
-            self.checkboxes[attr_name] = toggle
-            
-            label = QLabel(attr_name)
-            label.setStyleSheet("color: #c0c0c0; font-size: 11px;")
-            
-            cont_layout.addWidget(toggle)
-            cont_layout.addWidget(label)
-            cont_layout.addStretch()
-            flags_grid.addWidget(container, row, col)
-
-        center_layout.addWidget(flags_group)
+        for attr_name in visible_attr_names:
+            if attr_name not in self.checkboxes:
+                 self.checkboxes[attr_name] = ToggleSwitch()
+                 # We don't addWidget here. They are used in FlagsDialog.
 
         # Properties Section
         props_group = QGroupBox("⚙️ Properties")
