@@ -255,9 +255,32 @@ class DatEditor:
                 # Animation Details (Timing)
                 if frames > 1:
                     # Async(1) + Loop(4) + Start(1) + Durations(frames * 8)
-                    detail_size = 1 + 4 + 1 + (frames * 8)
-                    b = f.read(detail_size)
+                    # detail_size = 1 + 4 + 1 + (frames * 8)
+                    # b = f.read(detail_size)
+                    
+                    # 1. Async
+                    b = f.read(1)
                     texture_bytes.extend(b)
+                    props["AnimAsync"] = b[0]
+                    
+                    # 2. Loop Count
+                    b = f.read(4)
+                    texture_bytes.extend(b)
+                    props["AnimLoop"] = struct.unpack("<I", b)[0]
+                    
+                    # 3. Start Frame
+                    b = f.read(1)
+                    texture_bytes.extend(b)
+                    props["AnimStart"] = b[0]
+                    
+                    # 4. Frame Durations (8 bytes each: 4 min, 4 max)
+                    durations = []
+                    for _ in range(frames):
+                         b = f.read(8)
+                         texture_bytes.extend(b)
+                         min_dur, max_dur = struct.unpack("<II", b)
+                         durations.append((min_dur, max_dur))
+                    props["FrameDurations"] = durations
 
                 # Sprite IDs
                 total_sprites = w * h * px * py * pz * layers * frames
@@ -298,9 +321,32 @@ class DatEditor:
 
             # Animation Details
             if frames > 1:
-                detail_size = 1 + 4 + 1 + (frames * 8)
-                b = f.read(detail_size)
+                # detail_size = 1 + 4 + 1 + (frames * 8)
+                # b = f.read(detail_size)
+
+                # 1. Async
+                b = f.read(1)
                 texture_bytes.extend(b)
+                props["AnimAsync"] = b[0]
+
+                # 2. Loop Count
+                b = f.read(4)
+                texture_bytes.extend(b)
+                props["AnimLoop"] = struct.unpack("<I", b)[0]
+
+                # 3. Start Frame
+                b = f.read(1)
+                texture_bytes.extend(b)
+                props["AnimStart"] = b[0]
+
+                # 4. Frame Durations
+                durations = []
+                for _ in range(frames):
+                     b = f.read(8)
+                     texture_bytes.extend(b)
+                     min_dur, max_dur = struct.unpack("<II", b)
+                     durations.append((min_dur, max_dur))
+                props["FrameDurations"] = durations
 
             # Sprite IDs
             total_sprites = w * h * px * py * pz * layers * frames
@@ -647,7 +693,7 @@ class SprEditor:
             total_iter = len(offsets)
             
             for i, offset in enumerate(offsets):
-                if progress_callback and i % 200 == 0:
+                if progress_callback and i % 2000 == 0:
                      progress_callback(i, total_iter)
                      
                 sprite_id = i + 1
@@ -1162,6 +1208,76 @@ class DroppablePreviewLabel(ClickableLabel):
 
 
 
+
+class OutfitDialog(QDialog):
+    def __init__(self, parent_tab):
+        super().__init__(parent_tab)
+        self.setWindowTitle("Outfit Filters")
+        self.setFixedWidth(250)
+        self.setStyleSheet("""
+            QDialog {
+                background: #1a1a2e;
+                border: 2px solid #5b9bd5;
+                border-radius: 8px;
+            }
+            QCheckBox {
+                color: #e0e0e0; font-size: 14px; padding: 5px; spacing: 10px;
+            }
+            QCheckBox::indicator {
+                width: 18px; height: 18px;
+                border: 2px solid #555555;
+                border-radius: 4px;
+                background: #2a2a3a;
+            }
+            QCheckBox::indicator:checked {
+                background: #4a90e2;
+                border: 2px solid #4a90e2;
+            }
+            QPushButton {
+                background: #4a90e2; color: white; border-radius: 4px; padding: 6px; font-weight: bold;
+            }
+            QPushButton:hover { background: #5b9bd5; }
+        """)
+        
+        layout = QVBoxLayout(self)
+        
+        # Addon 1
+        self.chk_addon1 = QCheckBox("Addon 1")
+        self.chk_addon1.setChecked(parent_tab.outfit_addon1_enabled)
+        self.chk_addon1.toggled.connect(parent_tab.on_toggle_addon1)
+        layout.addWidget(self.chk_addon1)
+        
+        # Addon 2
+        self.chk_addon2 = QCheckBox("Addon 2")
+        self.chk_addon2.setChecked(parent_tab.outfit_addon2_enabled)
+        self.chk_addon2.toggled.connect(parent_tab.on_toggle_addon2)
+        layout.addWidget(self.chk_addon2)
+        
+        # Mount
+        self.chk_mount = QCheckBox("Mount")
+        self.chk_mount.setChecked(parent_tab.outfit_mount_enabled)
+        self.chk_mount.toggled.connect(parent_tab.on_toggle_mount)
+        layout.addWidget(self.chk_mount)
+        
+        # Mask
+        self.chk_mask = QCheckBox("Mask / Color")
+        self.chk_mask.setChecked(parent_tab.outfit_mask_enabled)
+        self.chk_mask.toggled.connect(parent_tab.on_toggle_mask)
+        layout.addWidget(self.chk_mask)
+        
+        # Walk
+        self.chk_walk = QCheckBox("Walk Animation")
+        self.chk_walk.setChecked(parent_tab.outfit_walk_enabled)
+        self.chk_walk.toggled.connect(parent_tab.on_toggle_walk)
+        layout.addWidget(self.chk_walk)
+
+        layout.addStretch()
+        
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+
+
 class FlagsDialog(QDialog):
     def __init__(self, checkboxes_dict, parent=None):
         super().__init__(parent)
@@ -1250,8 +1366,8 @@ class DatSprTab(QWidget):
         self.current_direction_key = "S"
 
 
-        self.anim_timer = QTimer()
-        self.anim_timer.timeout.connect(self.update_animation_step)
+        self.animation_timer = QTimer()
+        self.animation_timer.timeout.connect(self.update_animation_step)
 
         self.visible_sprite_widgets = {}
         self.current_ids = []
@@ -1268,6 +1384,13 @@ class DatSprTab(QWidget):
         self.build_ui()
         self.settings = QSettings("TibiaItemManager", "DatSprEditor")
         self.load_settings()
+
+    def open_outfit_dialog(self):
+        # We assume self.outfit_dialog can be reused or created new
+        # Since state is in parent (self), we can create new or store it.
+        # Let's create new to keep it simple and stateless regarding the window itself.
+        dialog = OutfitDialog(self)
+        dialog.exec()
 
     def open_flags_dialog(self):
         if not self.flags_dialog:
@@ -1497,36 +1620,9 @@ class DatSprTab(QWidget):
 
         center_layout.addWidget(actions_frame)
 
-        # Outfit Options Toolbar
-        outfit_frame = QFrame()
-        outfit_frame.setStyleSheet("background: rgba(30, 30, 46, 0.5); border-radius: 6px;")
-        outfit_layout = QHBoxLayout(outfit_frame)
-        outfit_layout.setContentsMargins(10, 5, 10, 5)
-        outfit_layout.setSpacing(10)
-        
-        self.addon_1_btn = QCheckBox("Addon 1")
-        self.addon_1_btn.toggled.connect(self.on_toggle_addon1)
-        outfit_layout.addWidget(self.addon_1_btn)
+        center_layout.addWidget(actions_frame)
 
-        self.addon_2_btn = QCheckBox("Addon 2")
-        self.addon_2_btn.toggled.connect(self.on_toggle_addon2)
-        outfit_layout.addWidget(self.addon_2_btn)
-        
-        # Note: addon_3_btn/Mount was referred in some places, usually just Mount
-        self.addon_3_btn = QCheckBox("Mount") # Reusing name for compatibility
-        self.addon_3_btn.toggled.connect(self.on_toggle_mount)
-        outfit_layout.addWidget(self.addon_3_btn)
-
-        self.mask_btn = QCheckBox("Mask")
-        self.mask_btn.toggled.connect(self.on_toggle_mask)
-        outfit_layout.addWidget(self.mask_btn)
-
-        self.layer_btn = QCheckBox("Walk") # "Walk" animation toggle
-        self.layer_btn.toggled.connect(self.on_toggle_walk)
-        outfit_layout.addWidget(self.layer_btn)
-        
-        outfit_layout.addStretch()
-        center_layout.addWidget(outfit_frame)
+        # Outfit Options were moved to Right Panel (Preview)
 
         # Pre-initialize checkboxes for background logic (Compact Mode)
         # We don't add them to the main layout anymore, they live in FlagsDialog
@@ -1613,10 +1709,14 @@ class DatSprTab(QWidget):
         self.image_label.spriteDropped.connect(self.handle_preview_drop)
         prev_layout.addWidget(self.image_label)
 
-        # Direction Controls Grid
-        dir_controls = QGridLayout()
-        dir_controls.setSpacing(5)
+        # 1. Direction Controls (Centered & Compact)
+        dir_container = QWidget()
+        dir_layout = QHBoxLayout(dir_container)
+        dir_layout.setContentsMargins(0, 0, 0, 0)
+        dir_layout.addStretch()
         
+        dir_grid = QGridLayout()
+        dir_grid.setSpacing(5)
         # Grid: Row, Col, DirectionKey, ArrowSymbol
         grid_map = [
             (0, 1, "N", "↑"), (1, 0, "W", "←"), (1, 2, "E", "→"), (2, 1, "S", "↓"),
@@ -1625,36 +1725,126 @@ class DatSprTab(QWidget):
         
         for r, c, key, label in grid_map:
             btn = QPushButton(label)
-            btn.setFixedSize(32, 32)
+            btn.setFixedSize(32, 32) # Slightly smaller for compact look
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet("background: rgba(30, 30, 46, 0.6); border: 1px solid rgba(74, 144, 226, 0.3); color: #5b9bd5; font-size: 16px; font-weight: bold;")
+            # Dark square style
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #3a3a3a;
+                    border: 1px solid #555555;
+                    border-radius: 4px;
+                    color: #d0d0d0;
+                    font-size: 14px;
+                    font-weight: bold;
+                    padding: 0px; 
+                }
+                QPushButton:hover {
+                    background-color: #4a4a4a;
+                    border-color: #777777;
+                }
+                QPushButton:pressed {
+                    background-color: #2a2a2a;
+                    border-color: #4a90e2;
+                }
+            """)
             btn.clicked.connect(lambda _, k=key: self.change_direction(k))
-            dir_controls.addWidget(btn, r, c)
+            dir_grid.addWidget(btn, r, c)
             self.dir_buttons[key] = btn
             
         center_btn = QPushButton("●")
         center_btn.setFixedSize(32, 32)
-        center_btn.setStyleSheet("background: rgba(30, 30, 46, 0.6); border: 1px solid rgba(74, 144, 226, 0.3); color: #5b9bd5;")
-        dir_controls.addWidget(center_btn, 1, 1) # Center button
+        center_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #3a3a3a;
+                    border: 1px solid #555555;
+                    border-radius: 4px;
+                    color: #5b9bd5;
+                    font-size: 12px;
+                }
+                QPushButton:hover {
+                    background-color: #4a4a4a;
+                }
+        """)
+        dir_grid.addWidget(center_btn, 1, 1) # Center button
+        
+        dir_layout.addLayout(dir_grid)
+        dir_layout.addStretch()
+        prev_layout.addWidget(dir_container)
+        
+        
+        # 2. Anim Controls (Centered Row) + Outfit Button
+        controls_container = QWidget()
+        controls_layout = QVBoxLayout(controls_container)
+        controls_layout.setContentsMargins(0, 5, 0, 5)
+        controls_layout.setSpacing(5)
 
-        prev_layout.addLayout(dir_controls)
+        # Anim Row
+        anim_row = QWidget()
+        anim_layout = QHBoxLayout(anim_row)
+        anim_layout.setContentsMargins(0,0,0,0)
+        anim_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Prev Button
+        self.prev_btn = QPushButton("<") 
+        self.prev_btn.setFixedSize(30, 30)
+        self.prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.prev_btn.setToolTip("Previous Frame")
+        self.prev_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #3a3a3a; color: white; border: 1px solid #555; padding: 0px;")
+        self.prev_btn.clicked.connect(lambda: self.change_preview_index(-1))
+        anim_layout.addWidget(self.prev_btn)
         
         # Anim Button
-        self.anim_btn = QPushButton("Play Animation")
+        self.anim_btn = QPushButton("PLAY")
+        self.anim_btn.setToolTip("Play Animation")
+        self.anim_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.anim_btn.setFixedSize(110, 30)
+        self.anim_btn.setStyleSheet("font-size: 11px; font-weight: bold; background-color: #4a90e2; color: white; border-radius: 4px;")
         self.anim_btn.clicked.connect(self.toggle_animation)
-        prev_layout.addWidget(self.anim_btn)
+        anim_layout.addWidget(self.anim_btn)
 
-        # Preview Info Labels
+        # Next Button
+        self.next_btn = QPushButton(">") 
+        self.next_btn.setFixedSize(30, 30)
+        self.next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.next_btn.setToolTip("Next Frame")
+        self.next_btn.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #3a3a3a; color: white; border: 1px solid #555; padding: 0px;")
+        self.next_btn.clicked.connect(lambda: self.change_preview_index(1))
+        anim_layout.addWidget(self.next_btn)
+        
+        controls_layout.addWidget(anim_row)
+
+        # Outfit Button (Replaces Checkboxes)
+        self.outfit_btn = QPushButton("⚙️ Outfit Options")
+        self.outfit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.outfit_btn.setFixedHeight(28)
+        self.outfit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(30, 30, 46, 0.6);
+                border: 1px solid #4a90e2;
+                border-radius: 4px;
+                color: #e0e0e0;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: rgba(74, 144, 226, 0.2);
+            }
+        """)
+        self.outfit_btn.clicked.connect(self.open_outfit_dialog)
+        controls_layout.addWidget(self.outfit_btn)
+
+        # Preview Info Labels (Restored)
         self.prev_index_label = QLabel("Frame: 0")
         self.prev_index_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.prev_index_label.setStyleSheet("color: #a0a0a0; font-size: 10px;")
-        prev_layout.addWidget(self.prev_index_label)
+        controls_layout.addWidget(self.prev_index_label)
 
         self.preview_info = QLabel("")
         self.preview_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_info.setStyleSheet("color: #808080; font-size: 10px;")
-        prev_layout.addWidget(self.preview_info)
-        
+        controls_layout.addWidget(self.preview_info)
+
+        prev_layout.addWidget(controls_container)
+
         right_layout.addWidget(preview_container)
 
         # Right Sidebar (Sprites)
@@ -1767,11 +1957,10 @@ class DatSprTab(QWidget):
         self.looktype_win.show()        
 
     def on_toggle_addon1(self, checked):
-        
+        print("DEBUG: Executing on_toggle_addon1 fixed") 
         self.outfit_addon1_enabled = checked
         if checked:
             self.outfit_addon2_enabled = False
-            self.addon_2_btn.setChecked(False)        
         else:
             self.current_framegroup_index = 0 
         
@@ -1779,12 +1968,10 @@ class DatSprTab(QWidget):
             self.prepare_preview_for_current_ids("outfits")
 
     def on_toggle_addon2(self, checked):
-
+        print("DEBUG: Executing on_toggle_addon2 fixed")
         self.outfit_addon2_enabled = checked
         if checked:
-
             self.outfit_addon1_enabled = False
-            self.addon_1_btn.setChecked(False)       
         else:
             self.current_framegroup_index = 0 
         
@@ -1826,14 +2013,43 @@ class DatSprTab(QWidget):
     def change_direction(self, dir_key):
         self.current_direction_key = dir_key
 
+        default_style = """
+            QPushButton {
+                background-color: #3a3a3a;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                color: #d0d0d0;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 0px; 
+            }
+            QPushButton:hover {
+                background-color: #4a4a4a;
+                border-color: #777777;
+            }
+            QPushButton:pressed {
+                background-color: #2a2a2a;
+                border-color: #4a90e2;
+            }
+        """
+        active_style = """
+            QPushButton {
+                background-color: #007acc;
+                border: 1px solid #34ce57;
+                border-radius: 4px;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 0px;
+            }
+        """
+
         # Atualiza visual dos botões
         for key, btn in self.dir_buttons.items():
             if key == dir_key:
-                btn.setStyleSheet(
-                    "background-color: #007acc; color: white; font-weight: bold;"
-                )
+                btn.setStyleSheet(active_style)
             else:
-                btn.setStyleSheet("")
+                btn.setStyleSheet(default_style)
 
         # Reseta animação e atualiza preview
         self.current_preview_index = 0
@@ -2917,6 +3133,37 @@ class DatSprTab(QWidget):
             self.sprite_page -= 1
             self.refresh_sprite_list()
 
+    def change_preview_index(self, delta):
+        if not self.current_preview_sprite_list:
+            return
+        
+        count = len(self.current_preview_sprite_list)
+        if count <= 1:
+            return
+
+        self.current_preview_index = (self.current_preview_index + delta) % count
+        self.show_preview_at_index(self.current_preview_index)
+
+    def toggle_animation(self):
+        if not self.current_preview_sprite_list or len(self.current_preview_sprite_list) <= 1:
+            return
+
+        if self.is_animating:
+            self.animation_timer.stop()
+            self.is_animating = False
+            self.anim_btn.setText("PLAY")
+            self.anim_btn.setStyleSheet("font-size: 11px; font-weight: bold; background-color: #4a90e2; color: white; border-radius: 4px;") 
+        else:
+            self.is_animating = True
+            self.anim_btn.setText("STOP")
+            self.anim_btn.setStyleSheet("font-size: 11px; font-weight: bold; background-color: #ff5555; color: white; border-radius: 4px;")
+            self.animation_timer.start(200) # 200 ms default
+
+    def update_animation_step(self):
+        if not self.is_animating:
+            return
+        self.change_preview_index(1)
+
     def update_preview_image(self):
         if (
             not self.spr
@@ -2961,6 +3208,103 @@ class DatSprTab(QWidget):
             f"Sprite {self.current_preview_index + 1} / {total}"
         )
         self.preview_info.setText(f"Sprite ID: {sprite_id}")
+
+    def toggle_animation(self):
+        if not self.current_preview_sprite_list:
+            return
+
+        if self.is_animating:
+            self.animation_timer.stop()
+            self.is_animating = False
+            self.anim_btn.setText("PLAY")
+            self.anim_btn.setStyleSheet("font-size: 11px; font-weight: bold; background-color: #4a90e2; color: white; border-radius: 4px;") 
+        else:
+            if len(self.current_preview_sprite_list) > 1:
+                # Determine initial duration
+                duration = 200
+                if self.current_ids:
+                    cat_key = self.get_current_category_key()
+                    item_data = self.editor.things.get(cat_key, {}).get(self.current_ids[0])
+                    if item_data:
+                        durations = item_data.get("props", {}).get("FrameDurations", [])
+                        if durations and len(durations) > self.current_preview_index:
+                             # Use min_duration (index 0 of tuple)
+                             duration = durations[self.current_preview_index][0]
+                
+                self.animation_timer.start(duration) 
+                self.is_animating = True
+                self.anim_btn.setText("STOP")
+                self.anim_btn.setStyleSheet("font-size: 11px; font-weight: bold; background-color: #ff5555; color: white; border-radius: 4px;")
+
+    def change_preview_index(self, delta):
+        if not hasattr(self, "current_preview_sprite_list") or not self.current_preview_sprite_list:
+            return
+
+        if self.current_ids:
+            cat_key = self.get_current_category_key()
+            item_data = self.editor.things.get(cat_key, {}).get(self.current_ids[0])
+            anim_count = item_data.get("props", {}).get("Animation", 1) if item_data else 1
+            
+            # If explicit animation count is > 1 use it, else generic list wrap
+            if anim_count > 1:
+                limit = anim_count
+            else:
+                limit = len(self.current_preview_sprite_list)
+        else:
+            limit = len(self.current_preview_sprite_list)
+
+        if limit <= 0:
+            return
+            
+        self.current_preview_index = (self.current_preview_index + delta) % limit
+        self.update_preview_image()
+
+    def update_animation_step(self):
+        if not self.current_preview_sprite_list:
+            self.animation_timer.stop()
+            self.is_animating = False
+            self.anim_btn.setText("Play Animation")
+            return
+
+        self.change_preview_index(1) # Next frame
+        
+        # Reset timer with new duration
+        duration = 200
+        if self.current_ids:
+            cat_key = self.get_current_category_key()
+            item_data = self.editor.things.get(cat_key, {}).get(self.current_ids[0])
+            if item_data:
+                durations = item_data.get("props", {}).get("FrameDurations", [])
+                
+                # Check bounds for durations
+                idx = self.current_preview_index
+                # If we are in outfit mode, frame index is separate from loop/direction?
+                # Actually show_preview_at_index calculates absolute sprite index, 
+                # but we need the 'animation phase' index.
+                # Standard animation (items/outfits) has 'Animation' frames.
+                
+                anim_frames = item_data.get("props", {}).get("Animation", 1)
+                
+                # We need the relative animation frame index.
+                # current_preview_index is effectively our frame index for items.
+                # For outfits, it might be more complex if index includes direction?
+                # Let's assume current_preview_index maps 1:1 to animation frame for now 
+                # or is modulo'd correctly in change_preview_index.
+                
+                # In change_preview_index: 
+                # self.current_preview_index = (self.current_preview_index + delta) % total_frames
+                # But for outfits, total_frames in sprite_list != animation frames count.
+                # Wait, current_preview_sprite_list for outfits contains ALL sprites?
+                # If so, current_preview_index is just an index into that list.
+                # We need to map it back to the animation phase index (0..frames-1).
+                
+                # Simplified approach: Use modulo with actual animation frame count from props
+                if anim_frames > 1:
+                     frame_idx = self.current_preview_index % anim_frames
+                     if durations and len(durations) > frame_idx:
+                         duration = durations[frame_idx][0]
+
+        self.animation_timer.start(duration)
 
     def on_preview_click(self):
         preview_list = getattr(self, "current_preview_sprite_list", [])
@@ -3033,11 +3377,7 @@ class DatSprTab(QWidget):
         self.outfit_mount_enabled = False
         self.outfit_mask_enabled = False
         self.outfit_walk_enabled = False
-        self.addon_1_btn.setChecked(False)
-        self.addon_2_btn.setChecked(False)
-        self.addon_3_btn.setChecked(False)
-        self.mask_btn.setChecked(False)
-        self.layer_btn.setChecked(False)
+
     
         self.current_ids = [item_id]
         self.id_entry.setText(str(item_id))
@@ -3212,11 +3552,7 @@ class DatSprTab(QWidget):
         self.outfit_mount_enabled = False
         self.outfit_mask_enabled = False
         self.outfit_walk_enabled = False
-        self.addon_1_btn.setChecked(False)
-        self.addon_2_btn.setChecked(False)
-        self.addon_3_btn.setChecked(False)
-        self.mask_btn.setChecked(False)
-        self.layer_btn.setChecked(False)            
+            
 
         cat_map = {
             "Item": "items",
@@ -3545,8 +3881,14 @@ class DatSprTab(QWidget):
         self.current_item_paty = 1
         self.current_item_patz = 1        
 
+        # Auto-stop animation when switching items to prevent ghosting, 
+        # but we will auto-start later if needed.
         if self.is_animating:
-            self.toggle_animation()
+             self.animation_timer.stop()
+             self.is_animating = False
+             self.anim_btn.setText("PLAY")
+             self.anim_btn.setStyleSheet("font-size: 11px; font-weight: bold; background-color: #4a90e2; color: white; border-radius: 4px;") 
+
 
         if not self.editor or not self.spr or not self.current_ids:
             self.clear_preview()
@@ -3587,6 +3929,15 @@ class DatSprTab(QWidget):
             self.clear_preview()
             return
 
+        # Auto-Play Animation check
+        anim_count = item.get("props", {}).get("Animation", 1)
+        if anim_count > 1:
+             if not self.is_animating:
+                 self.is_animating = True
+                 self.anim_btn.setText("STOP")
+                 self.anim_btn.setStyleSheet("font-size: 11px; font-weight: bold; background-color: #ff5555; color: white; border-radius: 4px;")
+                 self.animation_timer.start(200)
+        
         self.current_preview_index = 0
         self.show_preview_at_index(self.current_preview_index)
 
@@ -3605,80 +3956,8 @@ class DatSprTab(QWidget):
         self.current_preview_sprite_list = []
         self.current_preview_index = 0
 
-    def toggle_animation(self):
-        if self.is_animating:
-            self.anim_timer.stop()
-            self.is_animating = False
-            self.anim_btn.setText("▶")
-        else:
-            if not self.current_ids:
-                return
-
-            cat_key = self.get_current_category_key()
-            if self.current_ids[0] in self.editor.things[cat_key]:
-                props = self.editor.things[cat_key][self.current_ids[0]].get("props", {})
-                anim_count = props.get("Animation", 1)
-            else:
-                anim_count = 1
-
-            if anim_count > 1:
-                self.is_animating = True
-                self.anim_btn.setText("■")
-         
-                self.current_preview_index = 0
-                self.anim_timer.start(200)  
-            else:
-                self.status_label.setText("Item has only 1 animation frame.")
-
-    def update_animation_step(self):
-        if not self.is_animating:
-            return
-
-        catkey = self.get_current_category_key()
-        if not self.current_ids:
-            self.toggle_animation()
-            return
-
-        item_data = self.editor.things[catkey].get(self.current_ids[0])
-        if not item_data:
-            return
-
-     
-        anim_frames = item_data["props"].get("Animation", 1)
-
-   
-        self.current_preview_index += 1
-
-        if self.current_preview_index >= anim_frames:
-            self.current_preview_index = 0
-
-        self.show_preview_at_index(self.current_preview_index)
-
-    def change_preview_index(self, delta):
-        if not self.current_preview_sprite_list:
-            return
-            
-        catkey = self.get_current_category_key()
-        if self.current_ids:
-            item_data = self.editor.things[catkey].get(self.current_ids[0])
-            if item_data:
-                props = item_data.get("props", {})
-                frames = props.get("Animation", 1)
-            else:
-                frames = 1
-        else:
-            frames = 1
-
-        new_index = self.current_preview_index + delta
 
 
-        if new_index < 0:
-            new_index = frames - 1  
-        elif new_index >= frames:
-            new_index = 0 
-
-        self.current_preview_index = new_index
-        self.show_preview_at_index(self.current_preview_index)
 
 
     def show_preview_at_index(self, anim_frame_index):
@@ -3716,10 +3995,12 @@ class DatSprTab(QWidget):
                 "N": 0, "NW": 0, "NE": 0, "E": 1, "S": 2, "SE": 2, "SW": 2, "W": 3, "C": 2,
             }
             dir_idx = outfit_dir_map.get(self.current_direction_key, 2)
+            if dir_idx >= patx:
+                dir_idx = 0
             
 
             sprites_per_direction = sprites_per_view
-            sprites_per_paty = sprites_per_direction * 4  
+            sprites_per_paty = sprites_per_direction * patx  
             sprites_per_patz = sprites_per_paty * paty
             sprites_per_frame = sprites_per_patz * patz
             
@@ -3899,11 +4180,12 @@ class DatSprTab(QWidget):
         if hasattr(self, "loading_overlay"):
             self.loading_label.setText(message)
             if hasattr(self, "loading_progress"):
+                self.loading_progress.show()
                 if progress_mode:
+                    self.loading_progress.setRange(0, 100) # Reset to definitive
                     self.loading_progress.setValue(0)
-                    self.loading_progress.show()
                 else:
-                    self.loading_progress.hide()
+                    self.loading_progress.setRange(0, 0) # Indeterminate mode
 
             self.loading_overlay.resize(self.size())
             self.loading_overlay.raise_()
@@ -3918,6 +4200,7 @@ class DatSprTab(QWidget):
             if total > 0:
                 percentage = int((value / total) * 100)
             
+            self.loading_progress.setRange(0, 100)
             self.loading_progress.setValue(percentage)
             
             if message:
