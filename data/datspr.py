@@ -26,7 +26,7 @@ from interface_utils import ToggleSwitch, ModernLabel
 
 
 from PIL import Image, ImageDraw, ImageFilter
-from PyQt6.QtCore import QMimeData, QPoint, Qt, QTimer, pyqtSignal, QSize, QRect
+from PyQt6.QtCore import Qt, QTimer, QSize, QSettings, QPoint, pyqtSignal, QRect
 from PyQt6.QtGui import (
     QColor,
     QContextMenuEvent,
@@ -63,6 +63,7 @@ from PyQt6.QtWidgets import (
     QLayout,
     QMenu,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -624,7 +625,7 @@ class SprEditor:
         self.sprites_data = {}
         self.modified = False
 
-    def load(self):
+    def load(self, progress_callback=None):
         
         if not os.path.exists(self.spr_path):
             return
@@ -642,7 +643,12 @@ class SprEditor:
 
             file_size = f.seek(0, 2)
 
+            total_iter = len(offsets)
+            
             for i, offset in enumerate(offsets):
+                if progress_callback and i % 200 == 0:
+                     progress_callback(i, total_iter)
+                     
                 sprite_id = i + 1
                 if offset == 0:
                     self.sprites_data[sprite_id] = b""
@@ -1187,9 +1193,26 @@ class DatSprTab(QWidget):
         self.sprite_page = 0
         self.sprite_thumbs = {}
         self.build_ui()
-        self.build_loading_overlay()
-        
-        
+        self.settings = QSettings("TibiaItemManager", "DatSprEditor")
+        self.load_settings()
+
+    def show_options_help(self):
+        msg = (
+            "<b>Extended:</b> Check this if your client is version 9.60 or higher (uses uint16 IDs).<br><br>"
+            "<b>Transparency:</b> Check this if your client is version 10.50 or higher (supports transparency in sprites).<br><br>"
+            "<i>If loading fails, try changing these options.</i>"
+        )
+        QMessageBox.information(self, "Loading Options Help", msg)
+
+    def load_settings(self):
+        saved_path = self.settings.value("last_spr_path", "")
+        if saved_path:
+            self.file_input.setText(saved_path)
+            # User prefers to click Load manually
+            # QTimer.singleShot(100, lambda: self.load_dat_file_from_path(saved_path))
+
+    def save_settings(self, path):
+        self.settings.setValue("last_spr_path", path)
 
     def build_ui(self):
         # Main Layout
@@ -1203,48 +1226,82 @@ class DatSprTab(QWidget):
         top_toolbar.setFixedHeight(50)
         toolbar_layout = QHBoxLayout(top_toolbar)
         toolbar_layout.setContentsMargins(15, 5, 15, 5)
-        toolbar_layout.setSpacing(10)
+        toolbar_layout.setSpacing(5) # Reduced spacing
 
         # Title/Icon
         title_lbl = QLabel("📁 File Manager")
-        title_lbl.setStyleSheet("color: #5b9bd5; font-weight: bold; text-transform: uppercase;")
+        title_lbl.setStyleSheet("color: #5b9bd5; font-weight: bold; text-transform: uppercase; margin-right: 0px;")
         toolbar_layout.addWidget(title_lbl)
 
         # File Input
         self.file_input = QLineEdit()
-        self.file_input.setPlaceholderText("Load dat/spr (10.98) - No file loaded")
+        self.file_input.setPlaceholderText("Path to Tibia.dat/.spr")
         self.file_input.setReadOnly(True)
-        toolbar_layout.addWidget(self.file_input, 1)
+        self.file_input.setMaximumWidth(350)
+        toolbar_layout.addWidget(self.file_input)
 
-        # Config Checkboxes
+        # Config Group (Extended, Transparency, Help)
+        config_frame = QFrame()
+        config_layout = QHBoxLayout(config_frame)
+        config_layout.setContentsMargins(0, 0, 0, 0)
+        config_layout.setSpacing(2) # Very tight spacing
+
         self.chk_extended = QCheckBox("Extended")
-        self.chk_extended.setStyleSheet("color: white; margin-right: 10px;")
-        toolbar_layout.addWidget(self.chk_extended)
+        self.chk_extended.setToolTip("Check this if your client version is 9.60+ (uses u16 ids).")
+        self.chk_extended.setChecked(False)
+        self.chk_extended.setStyleSheet("color: white; margin-right: 5px;")
+        config_layout.addWidget(self.chk_extended)
 
         self.chk_transparency = QCheckBox("Transparency")
-        self.chk_transparency.setChecked(True)
-        self.chk_transparency.setStyleSheet("color: white; margin-right: 10px;")
-        toolbar_layout.addWidget(self.chk_transparency)
+        self.chk_transparency.setToolTip("Check this if your SPR has transparency support (usually 10.50+).")
+        self.chk_transparency.setChecked(False)
+        self.chk_transparency.setStyleSheet("color: white; margin-right: 5px;")
+        config_layout.addWidget(self.chk_transparency)
+
+        # Help Button
+        help_btn = QPushButton("(?)")
+        help_btn.setFixedSize(25, 25)
+        help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        help_btn.setStyleSheet("color: #4a90e2; font-weight: bold; border: 1px solid #4a90e2; border-radius: 12px;")
+        help_btn.setToolTip("Click for help on options")
+        help_btn.clicked.connect(self.show_options_help)
+        config_layout.addWidget(help_btn)
+
+        toolbar_layout.addWidget(config_frame)
+
+        # Actions Button Group
+        btns_frame = QFrame()
+        btns_layout = QHBoxLayout(btns_frame)
+        btns_layout.setContentsMargins(0, 0, 0, 0)
+        btns_layout.setSpacing(5)
 
         # Browse Button
         browse_btn = QPushButton("📂 Browse")
+        browse_btn.setFixedSize(90, 30)
         browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        browse_btn.clicked.connect(self.load_dat_file)
-        toolbar_layout.addWidget(browse_btn)
+        browse_btn.clicked.connect(self.browse_file)
+        btns_layout.addWidget(browse_btn)
 
         # Load Button
         self.load_btn = QPushButton("⚡ Load")
         self.load_btn.setObjectName("primaryBtn")
+        self.load_btn.setFixedSize(80, 30)
         self.load_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.load_btn.clicked.connect(self.load_dat_file)
-        toolbar_layout.addWidget(self.load_btn)
+        self.load_btn.clicked.connect(self.on_load_clicked)
+        btns_layout.addWidget(self.load_btn)
 
         # Save Button
-        self.save_button = QPushButton("💾 Save/Recompile SPR")
+        self.save_button = QPushButton("💾 Save SPR")
         self.save_button.setObjectName("successBtn")
+        self.save_button.setFixedSize(100, 30)
         self.save_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.save_button.clicked.connect(self.save_dat_file)
-        toolbar_layout.addWidget(self.save_button)
+        btns_layout.addWidget(self.save_button)
+
+        toolbar_layout.addWidget(btns_frame)
+
+        # Push everything to the left
+        toolbar_layout.addStretch()
 
         main_layout.addWidget(top_toolbar)
 
@@ -1306,36 +1363,45 @@ class DatSprTab(QWidget):
         actions_layout.setSpacing(10)
 
         # ID Input
-        actions_layout.addWidget(QLabel("Current ID:"))
+        # ID Input
+        lbl_id = QLabel("Current ID:")
+        lbl_id.setStyleSheet("color: white; font-weight: bold; margin-right: 5px;")
+        actions_layout.addWidget(lbl_id)
+
         self.id_entry = QLineEdit()
         self.id_entry.setPlaceholderText("ID")
         self.id_entry.setFixedWidth(60)
+        self.id_entry.setStyleSheet("background-color: #3e3e50; border: 1px solid #5b9bd5; border-radius: 4px; color: white; padding: 2px; font-weight: bold;")
         self.id_entry.returnPressed.connect(self.load_ids_from_entry)
         actions_layout.addWidget(self.id_entry)
 
-        self.load_ids_button = QPushButton("Go")
-        self.load_ids_button.setFixedWidth(40)
+        self.load_ids_button = QPushButton("GO")
+        self.load_ids_button.setFixedWidth(50)
         self.load_ids_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.load_ids_button.setStyleSheet("background-color: #4a90e2; color: white; border-radius: 4px; font-weight: bold; font-size: 12px;")
         self.load_ids_button.clicked.connect(self.load_ids_from_entry)
         actions_layout.addWidget(self.load_ids_button)
 
         actions_layout.addStretch()
 
         # Tools
-        self.insert_id_button = QPushButton("+ New")
+        self.insert_id_button = QPushButton("+ NEW")
         self.insert_id_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.insert_id_button.setStyleSheet("font-weight: bold; color: white;")
         self.insert_id_button.clicked.connect(self.insert_new_id)
         actions_layout.addWidget(self.insert_id_button)
 
-        self.delete_id_button = QPushButton("- Del")
+        self.delete_id_button = QPushButton("- DEL")
         self.delete_id_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.delete_id_button.setStyleSheet("font-weight: bold; color: white;")
         self.delete_id_button.clicked.connect(self.delete_current_id)
         actions_layout.addWidget(self.delete_id_button)
 
         # Apply
-        self.apply_button = QPushButton("Apply Changes")
+        self.apply_button = QPushButton("APPLY CHANGES")
         self.apply_button.setObjectName("primaryBtn")
         self.apply_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.apply_button.setStyleSheet("font-weight: bold; font-size: 11px;")
         self.apply_button.clicked.connect(self.apply_changes)
         actions_layout.addWidget(self.apply_button)
 
@@ -1481,14 +1547,18 @@ class DatSprTab(QWidget):
         # Direction Controls Grid
         dir_controls = QGridLayout()
         dir_controls.setSpacing(5)
+        
+        # Grid: Row, Col, DirectionKey, ArrowSymbol
         grid_map = [
             (0, 1, "N", "↑"), (1, 0, "W", "←"), (1, 2, "E", "→"), (2, 1, "S", "↓"),
             (0, 0, "NW", "↖"), (2, 0, "SW", "↙"), (0, 2, "NE", "↗"), (2, 2, "SE", "↘")
         ]
+        
         for r, c, key, label in grid_map:
             btn = QPushButton(label)
             btn.setFixedSize(32, 32)
-            btn.setStyleSheet("background: rgba(30, 30, 46, 0.6); border: 1px solid rgba(74, 144, 226, 0.3); color: #5b9bd5;")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet("background: rgba(30, 30, 46, 0.6); border: 1px solid rgba(74, 144, 226, 0.3); color: #5b9bd5; font-size: 16px; font-weight: bold;")
             btn.clicked.connect(lambda _, k=key: self.change_direction(k))
             dir_controls.addWidget(btn, r, c)
             self.dir_buttons[key] = btn
@@ -1578,6 +1648,7 @@ class DatSprTab(QWidget):
         main_layout.addWidget(status_bar)
 
         self.disable_editing()
+        self.build_loading_overlay()
 
         # Context menu
         self.context_menu = QMenu(self)
@@ -2669,8 +2740,8 @@ class DatSprTab(QWidget):
 
             is_current = spr_id == self.selected_sprite_id
 
-            bg_color = "#555555" if is_current else "transparent"
-            txt_color = "cyan" if is_current else "white"
+            bg_color = "#28a745" if is_current else "transparent"
+            txt_color = "white" if is_current else "white"
 
             def make_click_handler(sid):
                 return lambda: self.select_sprite(sid, from_preview_click=False)
@@ -2752,7 +2823,7 @@ class DatSprTab(QWidget):
             if spr_id == self.selected_sprite_id:
                 try:
                     label_widget.setStyleSheet(
-                        "background-color: #555555; color: cyan; padding: 5px;"
+                        "background-color: #28a745; color: white; padding: 5px;"
                     )
                 except:
                     pass
@@ -2908,7 +2979,7 @@ class DatSprTab(QWidget):
         for iid, button in self.id_buttons.items():
             if iid == item_id:
                 button.setStyleSheet(
-                    "background-color: #555555; color: cyan; padding: 5px;"
+                    "background-color: #28a745; color: white; border: 1px solid #34ce57; padding: 5px;"
                 )
             else:
                 button.setStyleSheet(
@@ -2942,12 +3013,24 @@ class DatSprTab(QWidget):
         for entry in self.numeric_entries.values():
             entry.setEnabled(True)
 
-    def load_dat_file(self):
+    def browse_file(self):
         filepath, _ = QFileDialog.getOpenFileName(
             self, "Select the .dat file", "", "DAT files (*.dat);;All files (*.*)"
         )
         if not filepath:
             return
+            
+        self.save_settings(filepath)
+        self.file_input.setText(filepath)
+
+    def on_load_clicked(self):
+        filepath = self.file_input.text()
+        if not filepath:
+            return
+        self.load_dat_file_from_path(filepath)
+
+    def load_dat_file_from_path(self, filepath):
+        self.file_input.setText(filepath)
 
         self.show_loading("Loading...\nPlease wait.")
 
@@ -2965,12 +3048,16 @@ class DatSprTab(QWidget):
             spr_path = base_path + ".spr"
 
             if os.path.exists(spr_path):
-                self.show_loading("Found .spr file.\nLoading sprites...")
+                self.show_loading("Found .spr file.\nLoading sprites...", progress_mode=True)
 
                 if hasattr(self, "spr") and self.spr:
                     pass
                 self.spr = SprEditor(spr_path, transparency=is_transparency)
-                self.spr.load()
+                
+                def update_spr_progress(current, total):
+                    self.update_progress(current, total, message=f"Loading Sprites...\n{current}/{total}")
+                    
+                self.spr.load(progress_callback=update_spr_progress)
 
                 self.preview_info.setText(
                     f"SPR loaded: {os.path.basename(spr_path)}\nSprites: {self.spr.sprite_count}"
@@ -2983,8 +3070,14 @@ class DatSprTab(QWidget):
 
         except Exception as e:
             print(e)
+            hint_msg = (
+                "\n\nPossible Fixes:\n"
+                "- If using client 9.60+, try checking 'Extended'.\n"
+                "- If using client 10.50+, try checking 'Transparency'.\n"
+                "- If checked, try unchecking them."
+            )
             QMessageBox.critical(
-                self, "Load Error", f"Could not load or parse the file:\n{e}"
+                self, "Load Error", f"Could not load or parse the file:\n{e}{hint_msg}"
             )
             self.status_label.setText("Failed to load the file.")
             self.status_label.setStyleSheet("color: red;")
@@ -3086,7 +3179,7 @@ class DatSprTab(QWidget):
             for iid, button in self.id_buttons.items():
                 if iid in self.current_ids:
                     button.setStyleSheet(
-                        "background-color: #555555; color: cyan; padding: 5px;"
+                        "background-color: #28a745; color: white; border: 1px solid #34ce57; padding: 5px;"
                     )
                 else:
                     button.setStyleSheet(
@@ -3712,15 +3805,58 @@ class DatSprTab(QWidget):
 
         overlay_layout.addWidget(self.loading_label)
 
-    def show_loading(self, message="Loading..."):
+        self.loading_progress = QProgressBar(self.loading_overlay)
+        self.loading_progress.setFixedWidth(400)
+        self.loading_progress.setFixedHeight(20)
+        self.loading_progress.setTextVisible(True)
+        self.loading_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.loading_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #4a90e2;
+                border-radius: 10px;
+                background-color: #1e1e2e;
+                color: white;
+                font-weight: bold;
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4a90e2, stop:1 #00d2ff);
+                border-radius: 8px;
+            }
+        """)
+        overlay_layout.addWidget(self.loading_progress)
+
+    def show_loading(self, message="Loading...", progress_mode=False):
         if hasattr(self, "loading_overlay"):
             self.loading_label.setText(message)
+            if hasattr(self, "loading_progress"):
+                if progress_mode:
+                    self.loading_progress.setValue(0)
+                    self.loading_progress.show()
+                else:
+                    self.loading_progress.hide()
+
             self.loading_overlay.resize(self.size())
             self.loading_overlay.raise_()
             self.loading_overlay.show()
 
             from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
 
+    def update_progress(self, value, total, message=None):
+        if hasattr(self, "loading_progress") and self.loading_overlay.isVisible():
+            percentage = 0
+            if total > 0:
+                percentage = int((value / total) * 100)
+            
+            self.loading_progress.setValue(percentage)
+            
+            if message:
+                self.loading_label.setText(message)
+            
+            self.loading_progress.setFormat(f"{value}/{total} ({percentage}%)")
+
+            from PyQt6.QtWidgets import QApplication
             QApplication.processEvents()
 
     def hide_loading(self):
