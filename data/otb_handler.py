@@ -109,6 +109,7 @@ class OTBHandler:
                 return None
             
             root = OTBNode()
+            root.header = sig # Store original header
             OTBHandler._parse_node_contents(f, root)
             return root
             
@@ -121,7 +122,9 @@ class OTBHandler:
         try:
             with open(filepath, 'wb') as f:
                 # Write signature 4 bytes
-                f.write(bytes([0, 0, 0, 0]))
+                header = getattr(node, 'header', bytes([0, 0, 0, 0]))
+                print(f"[OTB Save] Using Header: {header.hex()}")
+                f.write(header)
                 OTBHandler._write_node(f, node)
         except Exception as e:
             print(f"Error saving OTB: {e}")
@@ -245,6 +248,8 @@ class OTBHandler:
                     if len(data) >= 4: node.attribs['majorVersion'] = struct.unpack('<I', data[0:4])[0]
                     if len(data) >= 8: node.attribs['minorVersion'] = struct.unpack('<I', data[4:8])[0]
                     if len(data) >= 12: node.attribs['buildNumber'] = struct.unpack('<I', data[8:12])[0]
+                    if len(data) >= 140: node.attribs['csdVersion'] = data[12:140]
+                    print(f"[OTB Load] Found Version: {node.attribs.get('majorVersion')}.{node.attribs.get('minorVersion')}.{node.attribs.get('buildNumber')}")
             except: pass
 
     @staticmethod
@@ -307,11 +312,35 @@ class OTBHandler:
         
         # 12. Version
         if 'majorVersion' in node.attribs:
-            maj = node.attribs.get('majorVersion', 0)
+            maj = node.attribs.get('majorVersion', 3)
             min_ = node.attribs.get('minorVersion', 0)
             bld = node.attribs.get('buildNumber', 0)
-            add_prop(ROOT_ATTR_VERSION, struct.pack('<III', maj, min_, bld))
-        elif ROOT_ATTR_VERSION in node.raw_props: add_prop(ROOT_ATTR_VERSION, node.raw_props[ROOT_ATTR_VERSION])
+            print(f"[OTB Save] Writing Version: {maj}.{min_}.{bld}")
+            
+            # Reconstruct standard 140-byte version struct (12 bytes ver + 128 bytes CSD string)
+            # Try to retrieve original CSD data if available
+            csd = b'\x00' * 128
+            if 'csdVersion' in node.attribs:
+                csd = node.attribs['csdVersion']
+                if len(csd) < 128: csd = csd + b'\x00' * (128 - len(csd))
+                elif len(csd) > 128: csd = csd[:128]
+            
+            # Fallback: check raw_props for CSD tail (offset 12)
+            elif ROOT_ATTR_VERSION in node.raw_props and len(node.raw_props[ROOT_ATTR_VERSION]) >= 140:
+                csd = node.raw_props[ROOT_ATTR_VERSION][12:140]
+            
+            b_ver = struct.pack('<III', maj, min_, bld) + csd
+            add_prop(ROOT_ATTR_VERSION, b_ver)
+            
+        elif ROOT_ATTR_VERSION in node.raw_props: 
+            print(f"[OTB Save] Preserving Raw Version Attribute")
+            add_prop(ROOT_ATTR_VERSION, node.raw_props[ROOT_ATTR_VERSION])
+        else:
+             # Fallback if this is the Root Node specifically?
+             # We can't easily tell if this is root node here without context, 
+             # but usually only Root has versions. 
+             # Use a heuristic: If it has children and no other attributes?
+             pass
 
         # Others
         handled = [ITEM_ATTR_SERVER_ID, ITEM_ATTR_CLIENT_ID, ITEM_ATTR_NAME, ITEM_ATTR_WEIGHT, 
