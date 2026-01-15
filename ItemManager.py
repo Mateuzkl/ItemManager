@@ -21,6 +21,7 @@ if assets_path not in sys.path:
 
 from datspr import DatSprTab
 from otb_editor import OtbEditorTab
+from tools_tab import ToolsTab
 
 class App(QMainWindow):
     def __init__(self):
@@ -55,6 +56,10 @@ class App(QMainWindow):
         # New OTB Editor Tab
         self.otb_editor_module = OtbEditorTab(self.datspr_module)
         self.tab_view.addTab(self.otb_editor_module, "Items.otb Editor")
+
+        # Tools Tab
+        self.tools_module = ToolsTab(self.datspr_module)
+        self.tab_view.addTab(self.tools_module, "Tools")
 
 def set_dark_theme(app):
     app.setStyle("Fusion")

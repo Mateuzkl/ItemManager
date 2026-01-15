@@ -1632,7 +1632,7 @@ class DatSprTab(QWidget):
 
         center_layout.addWidget(actions_frame)
 
-        center_layout.addWidget(actions_frame)
+
 
         # Outfit Options were moved to Right Panel (Preview)
 
@@ -4234,3 +4234,52 @@ class DatSprTab(QWidget):
         if hasattr(self, "loading_overlay") and self.loading_overlay.isVisible():
             self.loading_overlay.resize(self.size())
         super().resizeEvent(event)
+
+    def open_looktype_generator(self):
+        try:
+            self.looktype_gen_window = LookTypeGeneratorWindow(self)
+            self.looktype_gen_window.show()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open LookType Generator: {e}")
+
+    def open_monster_generator(self):
+        try:
+            self.monster_gen_window = MonsterGeneratorWindow(self)
+            self.monster_gen_window.show()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open Monster Generator: {e}")
+
+    def open_spell_maker(self):
+        try:
+            self.spell_maker_window = SpellMakerWindow(self)
+            self.spell_maker_window.show()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open Spell Maker: {e}")
+
+    def open_shader(self):
+        try:
+            self.shader_window = ShaderEditor(self)
+            self.shader_window.show()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open Shader Editor: {e}")
+
+    def open_particle(self):
+        try:
+            self.particle_window = ParticleGenerator(self)
+            self.particle_window.show()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open Particle Editor: {e}")
+
+    def open_sprite_editor(self):
+        try:
+             self.slice_window = SliceWindow(self)
+             self.slice_window.show()
+        except Exception as e:
+             QMessageBox.critical(self, "Error", f"Failed to open Sprite Editor: {e}")
+
+    def open_sprite_optimizer(self):
+        try:
+             self.optimizer_window = SpriteOptimizerWindow(self)
+             self.optimizer_window.show()
+        except Exception as e:
+             QMessageBox.critical(self, "Error", f"Failed to open Sprite Optimizer: {e}")
