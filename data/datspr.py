@@ -118,6 +118,18 @@ METADATA_FLAGS = {
     0x25: ("Unwrappable", ""),
     0x26: ("TopEffect", ""),
     0x27: ("Usable", ""),
+    0x28: ("ChangedToExpire", "<H"),
+    0x29: ("Corpse", ""),
+    0x2A: ("PlayerCorpse", ""),
+    0x2B: ("CyclopediaItem", "<H"),
+    0x2C: ("Ammo", ""),
+    0x2D: ("ShowOffSocket", ""),
+    0x2E: ("Reportable", ""),
+    0x2F: ("UpgradeClassification", "<H"),
+    0x30: ("Wearout", ""),
+    0x31: ("ClockExpire", ""),
+    0x32: ("Expire", ""),
+    0x33: ("ExpireStop", ""),
 }
 REVERSE_METADATA_FLAGS = {info[0]: flag for flag, info in METADATA_FLAGS.items()}
 LAST_FLAG = 0xFF
@@ -2861,6 +2873,9 @@ class DatSprTab(QWidget):
         start_id_offset = 100 if current_cat_key == "items" else 1
 
         search_text = self.search_input.text().strip()
+        
+        end_id = 0
+        max_id = 0
         
         if search_text:
             # Search mode: Find matching IDs

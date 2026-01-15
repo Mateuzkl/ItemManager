@@ -19,8 +19,8 @@ assets_path = os.path.join(base_path, "assets/images")
 if assets_path not in sys.path:
     sys.path.append(assets_path)    
 
-from otbReload import OtbReloadTab
 from datspr import DatSprTab
+from otb_editor import OtbEditorTab
 
 class App(QMainWindow):
     def __init__(self):
@@ -51,13 +51,10 @@ class App(QMainWindow):
 
         
         self.tab_view.addTab(self.datspr_module, "Spr/Dat Editor")
-
-        self.tab_otbreload = QWidget()
-        self.tab_view.addTab(self.tab_otbreload, "Otb Reload")
         
-        otb_layout = QVBoxLayout(self.tab_otbreload)
-        self.otb_module = OtbReloadTab()
-        otb_layout.addWidget(self.otb_module)
+        # New OTB Editor Tab
+        self.otb_editor_module = OtbEditorTab(self.datspr_module)
+        self.tab_view.addTab(self.otb_editor_module, "Items.otb Editor")
 
 def set_dark_theme(app):
     app.setStyle("Fusion")
