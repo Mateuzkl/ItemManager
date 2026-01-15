@@ -1474,10 +1474,23 @@ class DatSprTab(QWidget):
         config_layout.addWidget(self.chk_transparency)
 
         # Help Button
-        help_btn = QPushButton("(?)")
+        help_btn = QPushButton("?")
         help_btn.setFixedSize(25, 25)
         help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        help_btn.setStyleSheet("color: #4a90e2; font-weight: bold; border: 1px solid #4a90e2; border-radius: 12px;")
+        help_btn.setStyleSheet("""
+            QPushButton {
+                background: none;
+                border: none;
+                color: #4a90e2;
+                font-weight: bold;
+                font-size: 18px;
+                padding: 0px;
+                margin-left: 5px;
+            }
+            QPushButton:hover {
+                color: #ffffff;
+            }
+        """)
         help_btn.setToolTip("Click for help on options")
         help_btn.clicked.connect(self.show_options_help)
         config_layout.addWidget(help_btn)
@@ -3317,7 +3330,9 @@ class DatSprTab(QWidget):
                 if anim_frames > 1:
                      frame_idx = self.current_preview_index % anim_frames
                      if durations and len(durations) > frame_idx:
-                         duration = durations[frame_idx][0]
+                         raw_dur = durations[frame_idx][0]
+                         # Clamp to sensible int32 range (e.g. max 1 hour)
+                         duration = max(10, min(int(raw_dur), 2147483647))
 
         self.animation_timer.start(duration)
 
@@ -3494,16 +3509,22 @@ class DatSprTab(QWidget):
 
         except Exception as e:
             print(e)
-            hint_msg = (
-                "\n\nPossible Fixes:\n"
-                "- If using client 9.60+, try checking 'Extended'.\n"
-                "- If using client 10.50+, try checking 'Transparency'.\n"
-                "- If checked, try unchecking them."
-            )
+            
+            # Smart Error Hinting
+            hints = []
+            if not is_extended:
+                hints.append("- Try checking 'Extended' (Client 9.60+).")
+            if not is_transparency:
+                hints.append("- Try checking 'Transparency' (Client 10.50+).")
+            
+            hint_msg = ""
+            if hints:
+                hint_msg = "\n\n💡 Suggestion:\n" + "\n".join(hints)
+            
             QMessageBox.critical(
-                self, "Load Error", f"Could not load or parse the file:\n{e}{hint_msg}"
+                self, "Load Error", f"Could not load the file.\n\nError: {e}{hint_msg}"
             )
-            self.status_label.setText("Failed to load the file.")
+            self.status_label.setText("Failed to load file.")
             self.status_label.setStyleSheet("color: red;")
 
         finally:

@@ -42,6 +42,17 @@ ITEM_ATTR_TOPORDER = 43
 ITEM_ATTR_WRITABLE3 = 44
 ITEM_ATTR_WAREID = 45 # TradeAs
 ITEM_ATTR_UPGRADE_CLASSIFICATION = 53
+ITEM_ATTR_WEAROUT = 54
+ITEM_ATTR_CLOCKEXPIRE = 55
+ITEM_ATTR_EXPIRE = 56
+ITEM_ATTR_EXPIRESTOP = 57
+ITEM_ATTR_CORPSE = 58
+ITEM_ATTR_PLAYERCORPSE = 59
+ITEM_ATTR_AMMO = 60
+ITEM_ATTR_SHOWOFFSOCKET = 61
+ITEM_ATTR_REPORTABLE = 62
+ITEM_ATTR_CHANGEDTOEXPIRE = 63
+ITEM_ATTR_CYCLOPEDIAITEM = 64
 
 # Virtuals
 ITEM_ATTR_ATTACK = 999 
@@ -244,6 +255,22 @@ class OTBHandler:
                 elif attr == ITEM_ATTR_UPGRADE_CLASSIFICATION:
                     if len(data) >= 1: node.attribs['upgradeClassification'] = data[0]
                 
+                # 13+ Attributes
+                elif attr == ITEM_ATTR_WEAROUT: node.attribs['wearout'] = True
+                elif attr == ITEM_ATTR_CLOCKEXPIRE: node.attribs['clockExpire'] = True
+                elif attr == ITEM_ATTR_EXPIRE: node.attribs['expire'] = True
+                elif attr == ITEM_ATTR_EXPIRESTOP: node.attribs['expireStop'] = True
+                elif attr == ITEM_ATTR_CORPSE: node.attribs['corpse'] = True
+                elif attr == ITEM_ATTR_PLAYERCORPSE: node.attribs['playerCorpse'] = True
+                elif attr == ITEM_ATTR_AMMO: node.attribs['ammo'] = True
+                elif attr == ITEM_ATTR_SHOWOFFSOCKET: node.attribs['showOffSocket'] = True
+                elif attr == ITEM_ATTR_REPORTABLE: node.attribs['reportable'] = True
+                
+                elif attr == ITEM_ATTR_CHANGEDTOEXPIRE:
+                     if len(data) >= 2: node.attribs['changedToExpire'] = struct.unpack('<H', data[:2])[0]
+                elif attr == ITEM_ATTR_CYCLOPEDIAITEM:
+                     if len(data) >= 2: node.attribs['cyclopediaItem'] = struct.unpack('<H', data[:2])[0]
+                
                 elif attr == ROOT_ATTR_VERSION:
                     if len(data) >= 4: node.attribs['majorVersion'] = struct.unpack('<I', data[0:4])[0]
                     if len(data) >= 8: node.attribs['minorVersion'] = struct.unpack('<I', data[4:8])[0]
@@ -309,6 +336,20 @@ class OTBHandler:
         # 11. Upgrade Classification
         if 'upgradeClassification' in node.attribs: add_prop(ITEM_ATTR_UPGRADE_CLASSIFICATION, bytes([node.attribs['upgradeClassification']]))
         elif ITEM_ATTR_UPGRADE_CLASSIFICATION in node.raw_props: add_prop(ITEM_ATTR_UPGRADE_CLASSIFICATION, node.raw_props[ITEM_ATTR_UPGRADE_CLASSIFICATION])
+        
+        # 13. New 13+ Attributes
+        if node.attribs.get('wearout'): add_prop(ITEM_ATTR_WEAROUT, b'')
+        if node.attribs.get('clockExpire'): add_prop(ITEM_ATTR_CLOCKEXPIRE, b'')
+        if node.attribs.get('expire'): add_prop(ITEM_ATTR_EXPIRE, b'')
+        if node.attribs.get('expireStop'): add_prop(ITEM_ATTR_EXPIRESTOP, b'')
+        if node.attribs.get('corpse'): add_prop(ITEM_ATTR_CORPSE, b'')
+        if node.attribs.get('playerCorpse'): add_prop(ITEM_ATTR_PLAYERCORPSE, b'')
+        if node.attribs.get('ammo'): add_prop(ITEM_ATTR_AMMO, b'')
+        if node.attribs.get('showOffSocket'): add_prop(ITEM_ATTR_SHOWOFFSOCKET, b'')
+        if node.attribs.get('reportable'): add_prop(ITEM_ATTR_REPORTABLE, b'')
+        
+        if 'changedToExpire' in node.attribs: add_prop(ITEM_ATTR_CHANGEDTOEXPIRE, struct.pack('<H', node.attribs['changedToExpire']))
+        if 'cyclopediaItem' in node.attribs: add_prop(ITEM_ATTR_CYCLOPEDIAITEM, struct.pack('<H', node.attribs['cyclopediaItem']))
         
         # 12. Version
         if 'majorVersion' in node.attribs:

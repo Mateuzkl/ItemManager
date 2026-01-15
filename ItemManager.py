@@ -4,7 +4,7 @@ import os
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QTabWidget, QLabel, QSplashScreen)
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QIcon, QPixmap, QPalette, QColor
+from PyQt6.QtGui import QIcon, QPixmap, QPalette, QColor, QPainter, QFont, QFontMetrics
 
 if getattr(sys, 'frozen', False):
     base_path = os.path.dirname(sys.executable)
@@ -96,6 +96,34 @@ if __name__ == "__main__":
     splash_pixmap = QPixmap(splash_path)
 
     if not splash_pixmap.isNull():
+        # Overwrite Author Name Programmatically
+        painter = QPainter(splash_pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        w = splash_pixmap.width()
+        h = splash_pixmap.height()
+        
+        font = QFont("Segoe UI", 9, QFont.Weight.Bold)
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1)
+        painter.setFont(font)
+        
+        new_text = "AUTHOR: SHERRAT & MATEUSKL"
+        fm = QFontMetrics(font)
+        tw = fm.horizontalAdvance(new_text)
+        th = fm.height()
+        
+        # Cover the entire bottom area to hide old text completely
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#1a1a1a")) # Use a dark tone matching the UI
+        painter.drawRect(0, h - 35, w, 35)
+        
+        # Draw New Text (Blue) - Right Aligned
+        painter.setPen(QColor("#5b9bd5"))
+        # Using h - 12 (approx baseline for 35px height)
+        painter.drawText(w - tw - 15, h - 12, new_text)
+        
+        painter.end()
+        
         splash = QSplashScreen(splash_pixmap, Qt.WindowType.WindowStaysOnTopHint)
         splash.show()
         

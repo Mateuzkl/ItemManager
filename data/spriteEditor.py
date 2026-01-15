@@ -40,6 +40,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QScrollArea,
     QSlider,
     QSpinBox,
@@ -48,7 +49,10 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QDoubleSpinBox,
-    QMenu
+    QMenu,
+    QMainWindow,
+    QDockWidget,
+    QToolBar
 )
 
 
@@ -476,18 +480,18 @@ class ZoomableGraphicsView(QGraphicsView):
             super().wheelEvent(event)
 
 
-class SliceWindow(QWidget):
+class SliceWindow(QMainWindow):
     
     sprites_imported = pyqtSignal(list)    
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Sprite Editor - Made by Sherrat")
-        self.resize(900, 600)
+        self.setWindowTitle("Sprite Editor - Made by Mateuskl")
+        self.resize(1300, 700)
 
         self.setWindowIcon(QIcon("editor.ico"))
 
-        self.setStyleSheet("background-color: #494949; color: white;")
+
         self.original_image_pil = None
         self.current_image_pil = None
         self.sliced_images = []
@@ -550,56 +554,35 @@ class SliceWindow(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-
-        toolbar = QFrame()
-        toolbar.setFixedHeight(40)
-        toolbar.setStyleSheet("background-color: #333; border-bottom: 1px solid #222;")
-        tb_layout = QHBoxLayout(toolbar)
-        tb_layout.setContentsMargins(10, 5, 10, 5)
-
+        # Toolbar (NATIVE QToolBar)
+        self.toolbar = self.addToolBar("Main")
+        self.toolbar.setMovable(True)
+        self.toolbar.setFloatable(True)
+        
         btn_open = QPushButton("Open Image")
-        btn_open.setStyleSheet("background-color: #555; padding: 5px;")
         btn_open.clicked.connect(self.open_image)
-        tb_layout.addWidget(btn_open)
+        self.toolbar.addWidget(btn_open)
 
-        # Novo botão: Export Project (exporta a imagem atual inteira, sem slices)
         btn_export_project = QPushButton("Export Project")
-        btn_export_project.setStyleSheet(
-            "background-color: #28a745; padding: 5px; font-weight: bold;"
-        )
+        btn_export_project.setStyleSheet("background-color: #28a745; font-weight: bold; color: white;")
         btn_export_project.clicked.connect(self.export_full_project)
-        tb_layout.addWidget(btn_export_project)
+        self.toolbar.addWidget(btn_export_project)
 
-        tb_layout.addStretch()
+
 
         btn_rot_r = QPushButton("Rot 90°")
         btn_rot_r.clicked.connect(lambda: self.transform_image("rotate_90"))
-        tb_layout.addWidget(btn_rot_r)
+        self.toolbar.addWidget(btn_rot_r)
 
         btn_flip_h = QPushButton("Flip H")
         btn_flip_h.clicked.connect(lambda: self.transform_image("flip_h"))
-        tb_layout.addWidget(btn_flip_h)
+        self.toolbar.addWidget(btn_flip_h)
 
-        main_layout.addWidget(toolbar)
-
-        # Splitter principal (vertical) para dividir canvas e painel de layers
-        self.main_splitter = QSplitter(Qt.Orientation.Vertical)
-        main_layout.addWidget(self.main_splitter, 1)
-
-        # Container para o conteúdo principal (canvas + painéis laterais)
-        content_widget = QWidget()
-        content_layout = QHBoxLayout(content_widget)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        self.main_splitter.addWidget(content_widget)
+        # No custom Close button - use Window Close
 
         left_panel = QFrame()
-        left_panel.setFixedWidth(283)
-        left_panel.setStyleSheet(
-            "QFrame { background-color: #444; border-right: 1px solid #222; } QLabel { color: #ddd; }"
-        )
+        left_panel.setMinimumWidth(200)
+
         lp_layout = QVBoxLayout(left_panel)
 
         self.tab_widget = QTabWidget()
@@ -1323,7 +1306,11 @@ class SliceWindow(QWidget):
         lp_layout.addWidget(grp_zoom)
 
         lp_layout.addStretch()
-        content_layout.addWidget(left_panel)
+        # Create Left Dock
+        self.left_dock = QDockWidget("Tools", self)
+        self.left_dock.setWidget(left_panel)
+        self.left_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.left_dock)
 
         self.scene = QGraphicsScene()
         self.scene.setBackgroundBrush(QColor(50, 50, 50))
@@ -1344,7 +1331,7 @@ class SliceWindow(QWidget):
         self.view.mouseMoveEvent = self.view_mouse_move
         self.view.mouseReleaseEvent = self.view_mouse_release
 
-        content_layout.addWidget(self.view, 1)
+        self.setCentralWidget(self.view)
 
         self.pixmap_item = QGraphicsPixmapItem()
         self.scene.addItem(self.pixmap_item)
@@ -1354,10 +1341,8 @@ class SliceWindow(QWidget):
         self.scene.addItem(self.grid_item)
 
         right_panel = QFrame()
-        right_panel.setFixedWidth(300)
-        right_panel.setStyleSheet(
-            "background-color: #444; border-left: 1px solid #222;"
-        )
+        right_panel.setMinimumWidth(180)
+
         rp_layout = QVBoxLayout(right_panel)
 
         rp_layout.addWidget(QLabel("Sprites:"))
@@ -1401,7 +1386,11 @@ class SliceWindow(QWidget):
         btn_clear.clicked.connect(self.clear_list)
         rp_layout.addWidget(btn_clear)
 
-        content_layout.addWidget(right_panel)
+        # Create Right Dock
+        self.right_dock = QDockWidget("Sprites", self)
+        self.right_dock.setWidget(right_panel)
+        self.right_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.right_dock)
 
 
         self.create_layers_panel()
@@ -1628,12 +1617,6 @@ class SliceWindow(QWidget):
     def create_layers_panel(self):
         """Cria o painel de layers na parte inferior"""
         layers_panel = QFrame()
-        layers_panel.setStyleSheet("""
-            QFrame {
-                background-color: #3a3a3a;
-                border-top: 2px solid #222;
-            }
-        """)
         layers_panel.setMinimumHeight(120)
         layers_panel.setMaximumHeight(200)
 
@@ -1645,7 +1628,7 @@ class SliceWindow(QWidget):
         header_layout = QHBoxLayout()
 
         lbl_title = QLabel("📑 LAYERS")
-        lbl_title.setStyleSheet("color: white; font-weight: bold; font-size: 12px;")
+        lbl_title.setStyleSheet("font-weight: bold; font-size: 12px;")
         header_layout.addWidget(lbl_title)
 
         header_layout.addStretch()
@@ -1719,7 +1702,7 @@ class SliceWindow(QWidget):
 
         # Label de opacidade
         lbl_opacity = QLabel("Opacity:")
-        lbl_opacity.setStyleSheet("color: #ccc; font-size: 11px;")
+        lbl_opacity.setStyleSheet("font-size: 11px;")
         header_layout.addWidget(lbl_opacity)
 
         # Slider de opacidade
@@ -1747,7 +1730,7 @@ class SliceWindow(QWidget):
         # Label do valor de opacidade
         self.lbl_opacity_value = QLabel("100%")
         self.lbl_opacity_value.setFixedWidth(35)
-        self.lbl_opacity_value.setStyleSheet("color: white; font-size: 11px;")
+        self.lbl_opacity_value.setStyleSheet("font-size: 11px;")
         header_layout.addWidget(self.lbl_opacity_value)
 
         header_layout.addSpacing(10)
@@ -1780,14 +1763,7 @@ class SliceWindow(QWidget):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                background-color: #2a2a2a;
-                border: 1px solid #444;
-                border-radius: 3px;
-            }
-        """)
-
+        
         # Container para os widgets de layer
         self.layers_container = QWidget()
         self.layers_layout = QHBoxLayout(self.layers_container)
@@ -1800,14 +1776,15 @@ class SliceWindow(QWidget):
 
         # Label de instrução
         self.lbl_layer_info = QLabel("Abra uma imagem para criar o Layer Main")
-        self.lbl_layer_info.setStyleSheet("color: #888; font-size: 10px;")
+        self.lbl_layer_info.setStyleSheet("font-size: 10px;")
         self.lbl_layer_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.lbl_layer_info)
 
-        self.main_splitter.addWidget(layers_panel)
-
-        # Define o tamanho inicial do splitter
-        self.main_splitter.setSizes([500, 150])
+        # Create Layers Dock
+        self.layers_dock = QDockWidget("Layers", self)
+        self.layers_dock.setWidget(layers_panel)
+        self.layers_dock.setAllowedAreas(Qt.DockWidgetArea.TopDockWidgetArea | Qt.DockWidgetArea.BottomDockWidgetArea)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.layers_dock)
 
     def add_main_layer(self):
         """Cria o layer principal (Main) com a imagem atual"""

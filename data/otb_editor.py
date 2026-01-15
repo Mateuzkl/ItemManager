@@ -1,10 +1,11 @@
+from PyQt6.QtGui import QIcon, QPixmap, QImage, QColor, QAction, QClipboard
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, 
                              QTreeWidget, QTreeWidgetItem, QGroupBox, QFormLayout, QSpinBox, 
                              QLineEdit, QSplitter, QMessageBox, QLabel, QCheckBox, QScrollArea,
                              QGridLayout, QFrame, QComboBox, QPlainTextEdit, QMenuBar, QMenu,
-                             QInputDialog, QTreeWidgetItemIterator, QProgressDialog, QProgressBar, QApplication)
-from PyQt6.QtGui import QIcon, QPixmap, QImage, QColor, QAction
-from PyQt6.QtCore import Qt, QSize
+                             QInputDialog, QTreeWidgetItemIterator, QProgressDialog, QProgressBar, QApplication,
+                             QStyle, QProxyStyle)
+from PyQt6.QtCore import Qt, QSize, QSettings
 from otb_handler import * 
 import sys
 from PIL import Image
@@ -26,6 +27,17 @@ def pil_to_qpixmap(pil_image):
     data = im2.tobytes("raw", "BGRA")
     qim = QImage(data, im2.width, im2.height, QImage.Format.Format_ARGB32)
     return QPixmap.fromImage(qim)
+
+
+    qim = QImage(data, im2.width, im2.height, QImage.Format.Format_ARGB32)
+    return QPixmap.fromImage(qim)
+
+
+class FastTooltipStyle(QProxyStyle):
+    def styleHint(self, hint, option=None, widget=None, returnData=None):
+        if hint == QStyle.StyleHint.SH_ToolTip_WakeUpDelay:
+            return 50  # 50ms delay (almost instant)
+        return super().styleHint(hint, option, widget, returnData)
 
 
 class DarkLoadingDialog(QProgressDialog):
@@ -70,7 +82,7 @@ class ExtendedAttributesDialog(QWidget):
         super().__init__(parent, Qt.WindowType.Window)
         self.attribs = attribs
         self.setWindowTitle("Extended Attributes (13+)")
-        self.setFixedSize(350, 180)
+        self.setFixedSize(500, 450)
         self.init_ui()
         self.apply_styles()
         
@@ -82,28 +94,82 @@ class ExtendedAttributesDialog(QWidget):
         grp = QGroupBox("13+ Features")
         grp_layout = QGridLayout(grp)
         
-        # Upgrade Classification (Checkbox + Spinbox)
+        # 1. Attributes with Values
+        # Upgrade Classification
         self.chk_upgrade = QCheckBox("Upgrade Classification")
-        self.chk_upgrade.stateChanged.connect(self.toggle_upgrade)
-        
+        self.chk_upgrade.stateChanged.connect(lambda s: self.inp_upgrade.setEnabled(s == 2))
+        self.chk_upgrade.setToolTip("ID 53: Classificação de Upgrade (0-255)")
         self.inp_upgrade = QSpinBox()
         self.inp_upgrade.setRange(0, 255)
-        self.inp_upgrade.setFixedWidth(60)
+        self.inp_upgrade.setFixedWidth(80)
         self.inp_upgrade.setEnabled(False)
         
-        # Load initial state
-        val = self.attribs.get('upgradeClassification', None)
-        if val is not None:
-            self.chk_upgrade.setChecked(True)
-            self.inp_upgrade.setValue(val)
-            self.inp_upgrade.setEnabled(True)
-        else:
-            self.chk_upgrade.setChecked(False)
-        
+        # Changed To Expire (Item ID)
+        self.chk_changedtoexpire = QCheckBox("Changed To Expire")
+        self.chk_changedtoexpire.stateChanged.connect(lambda s: self.inp_changedtoexpire.setEnabled(s == 2))
+        self.chk_changedtoexpire.setToolTip("ID 63: ID do item que se transformará ao expirar (Uint16)")
+        self.inp_changedtoexpire = QSpinBox()
+        self.inp_changedtoexpire.setRange(0, 65535)
+        self.inp_changedtoexpire.setFixedWidth(80)
+        self.inp_changedtoexpire.setEnabled(False)
+
+        # Cyclopedia Item (Type)
+        self.chk_cyclopedia = QCheckBox("Cyclopedia Item")
+        self.chk_cyclopedia.stateChanged.connect(lambda s: self.inp_cyclopedia.setEnabled(s == 2))
+        self.chk_cyclopedia.setToolTip("ID 64: Tipo do item na Cyclopedia (Uint16)")
+        self.inp_cyclopedia = QSpinBox()
+        self.inp_cyclopedia.setRange(0, 65535)
+        self.inp_cyclopedia.setFixedWidth(80)
+        self.inp_cyclopedia.setEnabled(False)
+
         grp_layout.addWidget(self.chk_upgrade, 0, 0)
         grp_layout.addWidget(self.inp_upgrade, 0, 1)
+        grp_layout.addWidget(self.chk_changedtoexpire, 1, 0)
+        grp_layout.addWidget(self.inp_changedtoexpire, 1, 1)
+        grp_layout.addWidget(self.chk_cyclopedia, 2, 0)
+        grp_layout.addWidget(self.inp_cyclopedia, 2, 1)
+
+        # 2. Boolean Flags (Grid)
+        flags_widget = QWidget()
+        flags_layout = QGridLayout(flags_widget)
+        flags_layout.setContentsMargins(0, 10, 0, 0)
         
+        self.flags_chks = {}
+        flags_list = [
+            ("Wearout", "wearout", "ID 54"),
+            ("Clock Expire", "clockExpire", "ID 55"),
+            ("Expire", "expire", "ID 56"),
+            ("Expire Stop", "expireStop", "ID 57"),
+            ("Corpse", "corpse", "ID 58"),
+            ("Player Corpse", "playerCorpse", "ID 59"),
+            ("Ammo", "ammo", "ID 60"),
+            ("ShowOff Socket", "showOffSocket", "ID 61"),
+            ("Reportable", "reportable", "ID 62")
+        ]
+        
+        row, col = 0, 0
+        for label, key, tip in flags_list:
+            chk = QCheckBox(label)
+            chk.setToolTip(tip)
+            self.flags_chks[key] = chk
+            flags_layout.addWidget(chk, row, col)
+            col += 1
+            if col > 2:
+                col = 0
+                row += 1
+        
+        grp_layout.addWidget(flags_widget, 3, 0, 1, 2)
         layout.addWidget(grp)
+        
+        # Load initial values
+        self._load_values()
+
+        # Warning Label
+        lbl_warning = QLabel("⚠️ <b>ATENÇÃO:</b> Estas flags funcionam apenas em <b>Clientes 13+</b>.<br>Ativar sem suporte pode causar <b>Debug/Crash</b>.")
+        lbl_warning.setWordWrap(True)
+        lbl_warning.setStyleSheet("color: #ffeb3b; font-size: 11px; margin-top: 5px;")
+        layout.addWidget(lbl_warning)
+        
         layout.addStretch()
         
         btn_box = QHBoxLayout()
@@ -115,18 +181,51 @@ class ExtendedAttributesDialog(QWidget):
         btn_box.addWidget(btn_save)
         btn_box.addWidget(btn_cancel)
         layout.addLayout(btn_box)
-        
-    def toggle_upgrade(self, state):
-        self.inp_upgrade.setEnabled(state == 2) # 2 is Checked
-        if state == 2 and self.inp_upgrade.value() == 0:
-            self.inp_upgrade.setValue(1) # Default to 1 if enabled
+
+    def _load_values(self):
+        # Upgrade
+        if 'upgradeClassification' in self.attribs:
+            self.chk_upgrade.setChecked(True)
+            self.inp_upgrade.setValue(self.attribs['upgradeClassification'])
+            self.inp_upgrade.setEnabled(True)
             
+        # ChangedToExpire
+        if 'changedToExpire' in self.attribs:
+            self.chk_changedtoexpire.setChecked(True)
+            self.inp_changedtoexpire.setValue(self.attribs['changedToExpire'])
+            self.inp_changedtoexpire.setEnabled(True)
+            
+        # Cyclopedia
+        if 'cyclopediaItem' in self.attribs:
+            self.chk_cyclopedia.setChecked(True)
+            self.inp_cyclopedia.setValue(self.attribs['cyclopediaItem'])
+            self.inp_cyclopedia.setEnabled(True)
+            
+        # Booleans
+        for key, chk in self.flags_chks.items():
+            if self.attribs.get(key, False):
+                chk.setChecked(True)
+
     def save(self):
-        if self.chk_upgrade.isChecked():
-            self.attribs['upgradeClassification'] = self.inp_upgrade.value()
-        else:
-            if 'upgradeClassification' in self.attribs:
-                del self.attribs['upgradeClassification']
+        # Upgrade
+        if self.chk_upgrade.isChecked(): self.attribs['upgradeClassification'] = self.inp_upgrade.value()
+        elif 'upgradeClassification' in self.attribs: del self.attribs['upgradeClassification']
+            
+        # ChangedToExpire
+        if self.chk_changedtoexpire.isChecked(): self.attribs['changedToExpire'] = self.inp_changedtoexpire.value()
+        elif 'changedToExpire' in self.attribs: del self.attribs['changedToExpire']
+            
+        # Cyclopedia
+        if self.chk_cyclopedia.isChecked(): self.attribs['cyclopediaItem'] = self.inp_cyclopedia.value()
+        elif 'cyclopediaItem' in self.attribs: del self.attribs['cyclopediaItem']
+        
+        # Booleans
+        for key, chk in self.flags_chks.items():
+            if chk.isChecked():
+                self.attribs[key] = True
+            elif key in self.attribs:
+                del self.attribs[key]
+                
         self.close()
 
     def apply_styles(self):
@@ -152,6 +251,14 @@ class OtbEditorTab(QWidget):
         self.otb_root = None
         self.current_node = None
         self.item_nodes = [] 
+        self.item_nodes = [] 
+        
+        # Settings
+        self.settings = QSettings("TibiaItemManager", "OtbEditor")
+
+        # Apply Fast Tooltips
+        QApplication.setStyle(FastTooltipStyle(QApplication.style()))
+        
         self.init_ui()
         self.create_menu_bar()
 
@@ -242,6 +349,13 @@ class OtbEditorTab(QWidget):
                 color: #e0e0e0;
                 font-family: "Segoe UI", sans-serif;
                 font-size: 13px;
+            }
+            
+            QToolTip {
+                background-color: #2a2a2a;
+                color: #ffffff;
+                border: 1px solid #ffffff;
+                padding: 4px;
             }
             
             /* GroupBox */
@@ -395,6 +509,8 @@ class OtbEditorTab(QWidget):
         self.tree.setHeaderHidden(True)
         self.tree.setIndentation(10)
         self.tree.itemClicked.connect(self.on_item_clicked)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self.open_context_menu)
         left_layout.addWidget(self.tree)
         
         splitter.addWidget(left_widget)
@@ -715,34 +831,7 @@ class OtbEditorTab(QWidget):
     
     def reload_all_attributes(self):
         # Placeholder for future implementation
-        pass
-        self.console_log = QPlainTextEdit()
-        self.console_log.setReadOnly(True)
-        self.console_log.setStyleSheet("background-color: #222; color: #aaa; font-family: Consolas; font-size: 11px; border: 1px solid #444;")
-        self.console_log.setMinimumHeight(150)
-        right_layout.addWidget(self.console_log)
-        
-        # Actions
-        actions_layout = QHBoxLayout()
-        self.btn_update = QPushButton("Update Node")
-        self.btn_update.setStyleSheet("background-color: #444; color: white;")
-        self.btn_update.clicked.connect(self.update_node)
-        
-        self.btn_debug = QPushButton("Debug (Log)")
-        self.btn_debug.setStyleSheet("background-color: #554422; color: white;")
-        self.btn_debug.clicked.connect(self.debug_current_node)
-        
-        self.btn_scan = QPushButton("Scan All (Log)")
-        self.btn_scan.setStyleSheet("background-color: #224455; color: white;")
-        self.btn_scan.clicked.connect(self.scan_otb)
-        
-        actions_layout.addWidget(self.btn_update)
-        actions_layout.addWidget(self.btn_debug)
-        actions_layout.addWidget(self.btn_scan)
-        right_layout.addLayout(actions_layout)
-
-        splitter.addWidget(right_scroll)
-        splitter.setSizes([300, 200, 500])
+        self.log("Reloading all attributes... (Not implemented yet)")
 
     def log(self, message):
         self.console_log.appendPlainText(f">> {message}")
@@ -752,8 +841,15 @@ class OtbEditorTab(QWidget):
             QMessageBox.warning(self, "Requirement", "Please load Tibia.dat and Tibia.spr first!")
             return
 
-        path, _ = QFileDialog.getOpenFileName(self, "Load OTB", "", "OTB Files (*.otb);;All Files (*)")
+
+
+        last_path = self.settings.value("last_otb_path", "")
+        start_dir = os.path.dirname(last_path) if last_path else ""
+
+        path, _ = QFileDialog.getOpenFileName(self, "Load OTB", start_dir, "OTB Files (*.otb);;All Files (*)")
         if not path: return
+        
+        self.settings.setValue("last_otb_path", path)
         
         self.log(f"Loading {path}...")
         
@@ -894,6 +990,64 @@ class OtbEditorTab(QWidget):
             # Update Preview
             self.update_preview_from_input()
             
+            # Check for Flag Mismatches
+            self.check_flag_mismatches()
+
+    def check_flag_mismatches(self):
+        if not self.current_node: return
+        cid = self.current_node.attribs.get('clientId', 0)
+        
+        dat_props = {}
+        # Access dat editor via datspr_module
+        if hasattr(self, 'datspr_module') and self.datspr_module and self.datspr_module.editor:
+             if "items" in self.datspr_module.editor.things and cid in self.datspr_module.editor.things["items"]:
+                 dat_props = self.datspr_module.editor.things["items"][cid].get("props", {})
+
+        # Mapping OTB Flag -> Dat Prop Key
+        mapping = {
+            FLAG_FULL_GROUND: "FullGround",
+            FLAG_BLOCK_SOLID: "Unpassable",
+            FLAG_BLOCK_PROJECTILE: "BlockMissile",
+            FLAG_BLOCK_PATHFIND: "BlockPathfind",
+            FLAG_PICKUPABLE: "Pickupable",
+            FLAG_STACKABLE: "Stackable",
+            FLAG_FORCE_USE: "ForceUse",
+            FLAG_ROTATABLE: "Rotatable",
+            FLAG_HANGABLE: "Hangable",
+            FLAG_HAS_HEIGHT: "HasElevation",
+            FLAG_ALWAYS_ON_TOP: "OnTop",
+        }
+        
+        # Inverted Logic Mappings (OTB=True <=> DAT=False)
+        inverted_mapping = {
+            FLAG_MOVEABLE: "Unmoveable" 
+        }
+
+        for chk, flag_val in self.flags_mapping:
+            # Reset Style
+            chk.setStyleSheet("QCheckBox::indicator:checked { background-color: #d32f2f; border: 1px solid #b71c1c; }")
+            chk.setToolTip("")
+            
+            otb_state = chk.isChecked()
+            
+            if flag_val in mapping:
+                dat_key = mapping[flag_val]
+                dat_state = dat_key in dat_props
+                
+                # If OTB says TRUE, but DAT says FALSE -> Mismatch (Critical)
+                if otb_state and not dat_state:
+                     chk.setStyleSheet("QCheckBox { color: #ffeb3b; font-weight: bold; } QCheckBox::indicator:checked { background-color: #fbc02d; border: 1px solid #fbc02d; }")
+                     chk.setToolTip(f"⚠️ AVISO: Esta flag está marcada no OTB, mas NÃO consta no arquivo .DAT ('{dat_key}').\nIsso pode gerar erros. Verifique se o item no .dat deveria ter '{dat_key}' ativo ou desmarque esta opção.")
+            
+            elif flag_val in inverted_mapping:
+                dat_key = inverted_mapping[flag_val]
+                dat_state = dat_key in dat_props
+                
+                # Mismatch: OTB Moveable (True) AND DAT Unmoveable (True)
+                if otb_state and dat_state:
+                     chk.setStyleSheet("QCheckBox { color: #ffeb3b; font-weight: bold; } QCheckBox::indicator:checked { background-color: #fbc02d; border: 1px solid #fbc02d; }")
+                     chk.setToolTip(f"⚠️ CONFLITO DE LÓGICA:\nNo OTB está como 'Movable' (pode mover), mas o cliente tem a flag '{dat_key}' (não pode mover) ativada.\nO item não poderá ser movido no jogo.")
+            
     def update_preview_from_input(self):
         cid = self.inp_client_id.value()
         if cid > 0:
@@ -924,6 +1078,39 @@ class OtbEditorTab(QWidget):
                 item.setHidden(False)
             else:
                 item.setHidden(search_term not in item.text(0).lower())
+
+    def open_context_menu(self, position):
+        item = self.tree.itemAt(position)
+        if not item: return
+        
+        node = item.data(0, Qt.ItemDataRole.UserRole)
+        if not node: return
+        
+        menu = QMenu()
+        menu.setStyleSheet("QMenu { background-color: #252525; border: 1px solid #444; color: white; } QMenu::item:selected { background-color: #0d47a1; }")
+        
+        dup_action = menu.addAction("Duplicate")
+        dup_action.triggered.connect(self.duplicate_item)
+        
+        reload_action = menu.addAction("Reload")
+        reload_action.triggered.connect(self.reload_current_item)
+        
+        menu.addSeparator()
+        
+        sid = node.attribs.get('serverId', 0)
+        cid = node.attribs.get('clientId', 0)
+        name = node.attribs.get('name', 'Item')
+        
+        cp_sid = menu.addAction(f"Copy Server ID ({sid})")
+        cp_sid.triggered.connect(lambda: QApplication.clipboard().setText(str(sid)))
+        
+        cp_cid = menu.addAction(f"Copy Client ID ({cid})")
+        cp_cid.triggered.connect(lambda: QApplication.clipboard().setText(str(cid)))
+        
+        cp_name = menu.addAction(f"Copy Name ('{name}')")
+        cp_name.triggered.connect(lambda: QApplication.clipboard().setText(name))
+        
+        menu.exec(self.tree.viewport().mapToGlobal(position))
 
     def open_extended_attributes(self):
         if not self.current_node: return
@@ -968,6 +1155,7 @@ class OtbEditorTab(QWidget):
         if not self.current_node: return
         self.current_node.attribs['clientId'] = self.inp_client_id.value()
         self.update_preview_from_input()
+        self.check_flag_mismatches()
         self.on_prop_change() # Update tree text
 
     def on_flag_change(self):
@@ -983,6 +1171,8 @@ class OtbEditorTab(QWidget):
     def update_node(self):
         self.on_prop_change()
         self.on_flag_change()
+        self.on_flag_change()
+        self.check_flag_mismatches()
         self.on_client_id_change()
         self.log("Node updated in memory (Save to persist).")
 
