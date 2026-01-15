@@ -41,6 +41,7 @@ ITEM_ATTR_LIGHT2 = 36
 ITEM_ATTR_TOPORDER = 43
 ITEM_ATTR_WRITABLE3 = 44
 ITEM_ATTR_WAREID = 45 # TradeAs
+ITEM_ATTR_UPGRADE_CLASSIFICATION = 53
 
 # Virtuals
 ITEM_ATTR_ATTACK = 999 
@@ -237,6 +238,8 @@ class OTBHandler:
                     if len(data) >= 2: node.attribs['minimapColor'] = struct.unpack('<H', data[:2])[0]
                 elif attr == ITEM_ATTR_WAREID:
                     if len(data) >= 2: node.attribs['wareId'] = struct.unpack('<H', data[:2])[0]
+                elif attr == ITEM_ATTR_UPGRADE_CLASSIFICATION:
+                    if len(data) >= 1: node.attribs['upgradeClassification'] = data[0]
                 
                 elif attr == ROOT_ATTR_VERSION:
                     if len(data) >= 4: node.attribs['majorVersion'] = struct.unpack('<I', data[0:4])[0]
@@ -298,7 +301,11 @@ class OTBHandler:
         if 'wareId' in node.attribs: add_prop(ITEM_ATTR_WAREID, struct.pack('<H', node.attribs['wareId']))
         elif ITEM_ATTR_WAREID in node.raw_props: add_prop(ITEM_ATTR_WAREID, node.raw_props[ITEM_ATTR_WAREID])
         
-        # 11. Version
+        # 11. Upgrade Classification
+        if 'upgradeClassification' in node.attribs: add_prop(ITEM_ATTR_UPGRADE_CLASSIFICATION, bytes([node.attribs['upgradeClassification']]))
+        elif ITEM_ATTR_UPGRADE_CLASSIFICATION in node.raw_props: add_prop(ITEM_ATTR_UPGRADE_CLASSIFICATION, node.raw_props[ITEM_ATTR_UPGRADE_CLASSIFICATION])
+        
+        # 12. Version
         if 'majorVersion' in node.attribs:
             maj = node.attribs.get('majorVersion', 0)
             min_ = node.attribs.get('minorVersion', 0)
@@ -309,7 +316,7 @@ class OTBHandler:
         # Others
         handled = [ITEM_ATTR_SERVER_ID, ITEM_ATTR_CLIENT_ID, ITEM_ATTR_NAME, ITEM_ATTR_WEIGHT, 
                    ITEM_ATTR_SPEED, ITEM_ATTR_ARMOR, ITEM_ATTR_WEAPON, ITEM_ATTR_LIGHT, 
-                   ITEM_ATTR_MINIMAPCOLOR, ITEM_ATTR_WAREID, ROOT_ATTR_VERSION]
+                   ITEM_ATTR_MINIMAPCOLOR, ITEM_ATTR_WAREID, ITEM_ATTR_UPGRADE_CLASSIFICATION, ROOT_ATTR_VERSION]
         
         for k, v in node.raw_props.items():
             if k not in handled and k != OTBM_ATTR_TILE_FLAGS: # Flags header handled separately

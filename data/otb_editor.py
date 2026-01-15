@@ -1,9 +1,10 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, 
                              QTreeWidget, QTreeWidgetItem, QGroupBox, QFormLayout, QSpinBox, 
-                             QLineEdit, QSplitter, QMessageBox, QLabel, QCheckBox, QScrollArea, 
+                             QLineEdit, QSplitter, QMessageBox, QLabel, QCheckBox, QScrollArea,
                              QGridLayout, QFrame, QComboBox, QPlainTextEdit, QMenuBar, QMenu,
-                             QInputDialog, QTreeWidgetItemIterator)
+                             QInputDialog, QTreeWidgetItemIterator, QProgressDialog, QProgressBar, QApplication)
 from PyQt6.QtGui import QIcon, QPixmap, QImage, QColor, QAction
+from PyQt6.QtCore import Qt, QSize
 from otb_handler import * 
 import sys
 from PIL import Image
@@ -25,6 +26,123 @@ def pil_to_qpixmap(pil_image):
     data = im2.tobytes("raw", "BGRA")
     qim = QImage(data, im2.width, im2.height, QImage.Format.Format_ARGB32)
     return QPixmap.fromImage(qim)
+
+
+class DarkLoadingDialog(QProgressDialog):
+    def __init__(self, title, label_text, parent=None):
+        super().__init__(label_text, None, 0, 100, parent) # No cancel button for now
+        self.setWindowTitle(title)
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.setMinimumDuration(0)
+        self.setMinimumWidth(400)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.CustomizeWindowHint | Qt.WindowType.WindowTitleHint)
+        self.setAutoClose(True)
+        self.setAutoReset(True)
+        
+        # Style matching the user request
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #121212;
+                color: #ffffff;
+            }
+            QLabel {
+                color: #ffffff;
+                font-family: "Segoe UI", sans-serif;
+                font-size: 14px;
+                font-weight: bold;
+                margin-bottom: 10px;
+            }
+            QProgressBar {
+                border: 1px solid #333;
+                border-radius: 6px;
+                text-align: center;
+                background-color: #1e1e1e;
+                color: #eee;
+            }
+            QProgressBar::chunk {
+                background-color: #0d47a1;
+                border-radius: 5px;
+            }
+        """)
+
+class ExtendedAttributesDialog(QWidget):
+    def __init__(self, attribs, parent=None):
+        super().__init__(parent, Qt.WindowType.Window)
+        self.attribs = attribs
+        self.setWindowTitle("Extended Attributes (13+)")
+        self.setFixedSize(350, 180)
+        self.init_ui()
+        self.apply_styles()
+        
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Group similar to the main interface Attributes
+        grp = QGroupBox("13+ Features")
+        grp_layout = QGridLayout(grp)
+        
+        # Upgrade Classification (Checkbox + Spinbox)
+        self.chk_upgrade = QCheckBox("Upgrade Classification")
+        self.chk_upgrade.stateChanged.connect(self.toggle_upgrade)
+        
+        self.inp_upgrade = QSpinBox()
+        self.inp_upgrade.setRange(0, 255)
+        self.inp_upgrade.setFixedWidth(60)
+        self.inp_upgrade.setEnabled(False)
+        
+        # Load initial state
+        val = self.attribs.get('upgradeClassification', None)
+        if val is not None:
+            self.chk_upgrade.setChecked(True)
+            self.inp_upgrade.setValue(val)
+            self.inp_upgrade.setEnabled(True)
+        else:
+            self.chk_upgrade.setChecked(False)
+        
+        grp_layout.addWidget(self.chk_upgrade, 0, 0)
+        grp_layout.addWidget(self.inp_upgrade, 0, 1)
+        
+        layout.addWidget(grp)
+        layout.addStretch()
+        
+        btn_box = QHBoxLayout()
+        btn_save = QPushButton("Save")
+        btn_save.clicked.connect(self.save)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.clicked.connect(self.close)
+        
+        btn_box.addWidget(btn_save)
+        btn_box.addWidget(btn_cancel)
+        layout.addLayout(btn_box)
+        
+    def toggle_upgrade(self, state):
+        self.inp_upgrade.setEnabled(state == 2) # 2 is Checked
+        if state == 2 and self.inp_upgrade.value() == 0:
+            self.inp_upgrade.setValue(1) # Default to 1 if enabled
+            
+    def save(self):
+        if self.chk_upgrade.isChecked():
+            self.attribs['upgradeClassification'] = self.inp_upgrade.value()
+        else:
+            if 'upgradeClassification' in self.attribs:
+                del self.attribs['upgradeClassification']
+        self.close()
+
+    def apply_styles(self):
+        self.setStyleSheet("""
+            QWidget { background-color: #121212; color: #e0e0e0; font-family: "Segoe UI"; }
+            QGroupBox { border: 1px solid #333; border-radius: 6px; margin-top: 24px; background-color: #1a1a1a; font-weight: bold; padding-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 4px 10px; background-color: #0d47a1; color: white; border-radius: 6px; }
+            QCheckBox { spacing: 8px; color: #ccc; }
+            QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #555; border-radius: 3px; background: #252525; }
+            QCheckBox::indicator:checked { background-color: #0d47a1; border-color: #0d47a1; }
+            QSpinBox { background-color: #252525; border: 1px solid #3d3d3d; border-radius: 4px; padding: 4px; color: #fff; }
+            QSpinBox:disabled { color: #555; border-color: #222; }
+            QPushButton { background-color: #252525; border: 1px solid #333; color: #e0e0e0; padding: 6px; border-radius: 4px; font-weight: 600; }
+            QPushButton:hover { background-color: #333; }
+            QPushButton:pressed { background-color: #0d47a1; }
+        """)
 
 
 class OtbEditorTab(QWidget):
@@ -104,8 +222,363 @@ class OtbEditorTab(QWidget):
         help_menu.addAction(about_action)
 
     def init_ui(self):
-        # Existing UI setup...
-        pass 
+        self.apply_styles()
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
+        
+        # Splitter
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(2)
+        main_layout.addWidget(splitter)
+        
+        # ... (rest of init_ui stays logic wise, but let's refresh the whole start) ...
+
+    def apply_styles(self):
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #121212;
+                color: #e0e0e0;
+                font-family: "Segoe UI", sans-serif;
+                font-size: 13px;
+            }
+            
+            /* GroupBox */
+            QGroupBox {
+                border: 1px solid #333;
+                border-radius: 6px;
+                margin-top: 24px;
+                background-color: #1a1a1a;
+                font-weight: bold;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 4px 10px;
+                background-color: #0d47a1; /* Deep Blue Accent */
+                color: white;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                border: 1px solid #0d47a1;
+            }
+            
+            /* Inputs */
+            QLineEdit, QSpinBox, QComboBox {
+                background-color: #252525;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                padding: 4px 8px;
+                color: #fff;
+                selection-background-color: #0d47a1;
+            }
+            QLineEdit:hover, QSpinBox:hover, QComboBox:hover {
+                border-color: #555;
+                background-color: #2d2d2d;
+            }
+            QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
+                border: 1px solid #448aff;
+                background-color: #202020;
+            }
+            
+            /* Checkbox */
+            QCheckBox {
+                spacing: 8px;
+                color: #ccc;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border: 1px solid #555;
+                border-radius: 3px;
+                background: #252525;
+            }
+            QCheckBox::indicator:unchecked:hover {
+                border-color: #777;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #0d47a1;
+                border-color: #0d47a1;
+                image: url(data:image/svg+xml;base64,...); /* Optional check icon */
+            }
+            
+            /* Tree Widget */
+            QTreeWidget {
+                background-color: #1a1a1a;
+                border: 1px solid #333;
+                border-radius: 6px;
+                alternate-background-color: #202020;
+                padding: 5px;
+            }
+            QTreeWidget::item {
+                padding: 4px;
+                border-radius: 3px;
+            }
+            QTreeWidget::item:hover {
+                background-color: #2a2a2a;
+            }
+            QTreeWidget::item:selected {
+                background-color: #0d47a1;
+                color: white;
+            }
+            
+            /* Splitter */
+            QSplitter::handle {
+                background-color: #333;
+            }
+            QSplitter::handle:hover {
+                background-color: #448aff;
+            }
+            
+            /* Scrollbars */
+            QScrollBar:vertical {
+                border: none;
+                background: #121212;
+                width: 10px;
+                margin: 0;
+            }
+            QScrollBar::handle:vertical {
+                background: #444;
+                min-height: 20px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #666;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            
+            /* Buttons */
+            QPushButton {
+                background-color: #252525;
+                border: 1px solid #333;
+                color: #e0e0e0;
+                padding: 6px 15px;
+                border-radius: 4px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #333;
+                border-color: #555;
+            }
+            QPushButton:pressed {
+                background-color: #0d47a1;
+                border-color: #0d47a1;
+            }
+        """)
+
+    def init_ui(self):
+        self.apply_styles()
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
+        
+        # Splitter
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(2)
+        main_layout.addWidget(splitter)
+        
+        # --- LEFT PANEL: Item List ---
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.search_inp = QLineEdit()
+        self.search_inp.setPlaceholderText("Search Item...")
+        self.search_inp.textChanged.connect(self.filter_tree)
+        left_layout.addWidget(self.search_inp)
+        
+        self.tree = QTreeWidget()
+        self.tree.setHeaderHidden(True)
+        self.tree.setIndentation(10)
+        self.tree.itemClicked.connect(self.on_item_clicked)
+        left_layout.addWidget(self.tree)
+        
+        splitter.addWidget(left_widget)
+        
+        # --- RIGHT PANEL: Content Area ---
+        right_container = QWidget()
+        right_layout = QVBoxLayout(right_container)
+        right_layout.setContentsMargins(5, 5, 5, 5)
+        
+        # Upper Section: Appearance | Attributes (Flags + Props)
+        upper_widget = QWidget()
+        upper_layout = QHBoxLayout(upper_widget)
+        upper_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 1. Appearance Column (Fixed Width)
+        app_grp = QGroupBox("Appearance")
+        app_grp.setFixedWidth(180)
+        app_layout = QVBoxLayout(app_grp)
+        
+        # Previous
+        app_layout.addWidget(QLabel("Previous:"))
+        self.lbl_prev_sprite = QLabel()
+        self.lbl_prev_sprite.setFixedSize(64, 64)
+        self.lbl_prev_sprite.setStyleSheet("border: 1px solid #444; background: #222;")
+        self.lbl_prev_sprite.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        app_layout.addWidget(self.lbl_prev_sprite)
+        
+        # Current
+        app_layout.addWidget(QLabel("Current:"))
+        self.lbl_preview = QLabel()
+        self.lbl_preview.setFixedSize(64, 64)
+        self.lbl_preview.setStyleSheet("border: 1px solid #444; background: #222;")
+        self.lbl_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        app_layout.addWidget(self.lbl_preview)
+        
+        app_layout.addSpacing(10)
+        
+        # IDs
+        app_layout.addWidget(QLabel("Server ID:"))
+        self.inp_server_id = QSpinBox(); self.inp_server_id.setRange(0, 65535)
+        self.inp_server_id.valueChanged.connect(self.on_prop_change)
+        app_layout.addWidget(self.inp_server_id)
+        
+        app_layout.addWidget(QLabel("Client ID:"))
+        self.inp_client_id = QSpinBox(); self.inp_client_id.setRange(0, 65535)
+        self.inp_client_id.valueChanged.connect(self.on_client_id_change)
+        app_layout.addWidget(self.inp_client_id)
+        
+        app_layout.addStretch()
+        upper_layout.addWidget(app_grp)
+        
+        # 2. Attributes & Properties (Main Area)
+        data_grp = QGroupBox("Attributes & Properties")
+        data_layout = QHBoxLayout(data_grp) # Horizontal: Flags | Props
+        
+        # A) Flags (Checkboxes)
+        flags_widget = QWidget()
+        flags_grid = QGridLayout(flags_widget)
+        flags_grid.setVerticalSpacing(5)
+        self.flags_mapping = []
+        
+        flag_names = [
+            ("Unpassable", FLAG_BLOCK_SOLID), ("Block Missiles", FLAG_BLOCK_PROJECTILE),
+            ("Block Path", FLAG_BLOCK_PATHFIND), ("Has Height", FLAG_HAS_HEIGHT),
+            ("Useable", FLAG_USEABLE), ("Pickupable", FLAG_PICKUPABLE),
+            ("Movable", FLAG_MOVEABLE), ("Stackable", FLAG_STACKABLE),
+            ("FloorChange Down", FLAG_FLOORCHANGE_DOWN), ("FloorChange North", FLAG_FLOORCHANGE_NORTH),
+            ("FloorChange East", FLAG_FLOORCHANGE_EAST), ("FloorChange South", FLAG_FLOORCHANGE_SOUTH),
+            ("FloorChange West", FLAG_FLOORCHANGE_WEST), ("Always Top", FLAG_ALWAYS_ON_TOP),
+            ("Readable", FLAG_READABLE), ("Rotatable", FLAG_ROTATABLE),
+            ("Hangable", FLAG_HANGABLE), ("Vertical", FLAG_VERTICAL),
+            ("Horizontal", FLAG_HORIZONTAL), ("Cannot Decay", FLAG_CANNOT_DECAY),
+            ("Allow DistRead", FLAG_ALLOW_DISTREAD), ("Client Charges", FLAG_CLIENT_CHARGES),
+            ("Ignore Look", FLAG_IGNORE_LOOK), ("Animation", FLAG_IS_ANIMATION),
+            ("Full Ground", FLAG_FULL_GROUND), ("Force Use", FLAG_FORCE_USE)
+        ]
+        
+        # 2 Columns of flags
+        r, c = 0, 0
+        for name, val in flag_names:
+            chk = QCheckBox(name)
+            chk.stateChanged.connect(self.on_flag_change)
+            chk.setStyleSheet("QCheckBox::indicator:checked { background-color: #d32f2f; border: 1px solid #b71c1c; }")
+            flags_grid.addWidget(chk, r, c)
+            self.flags_mapping.append((chk, val))
+            r += 1
+            if r > 12: # Break to next col
+                r = 0
+                c += 1
+        
+        data_layout.addWidget(flags_widget)
+        
+        # B) Properties (Inputs)
+        props_widget = QWidget()
+        props_form = QFormLayout(props_widget)
+        props_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        
+        self.inp_name = QLineEdit()
+        self.inp_name.textChanged.connect(self.on_prop_change)
+        props_form.addRow("Name:", self.inp_name)
+        
+        self.inp_type = QComboBox() 
+        self.inp_type.addItems(["None", "Ground", "Container", "Weapon", "Ammunition", "Armor", "Charges", "Teleport", "MagicField", "Writeable", "Key", "Splash", "Fluid", "Door", "Deprecated", "Depot"])
+        self.inp_type.currentIndexChanged.connect(self.on_prop_change)
+        props_form.addRow("Type:", self.inp_type)
+
+        self.inp_stack_order = QComboBox(); self.inp_stack_order.addItems(["None", "Border", "Bottom", "Top"])
+        self.inp_stack_order.currentIndexChanged.connect(self.on_prop_change)
+        props_form.addRow("Stack Order:", self.inp_stack_order)
+
+        self.inp_weight = QSpinBox(); self.inp_weight.setRange(0, 999999)
+        self.inp_weight.valueChanged.connect(self.on_prop_change)
+        props_form.addRow("Weight:", self.inp_weight)
+        
+        self.inp_wareid = QSpinBox(); self.inp_wareid.setRange(0, 65535)
+        self.inp_wareid.valueChanged.connect(self.on_prop_change)
+        props_form.addRow("Ware ID:", self.inp_wareid)
+
+        self.inp_armor = QSpinBox(); self.inp_armor.setRange(0, 999999)
+        self.inp_armor.valueChanged.connect(self.on_prop_change)
+        props_form.addRow("Armor:", self.inp_armor)
+        
+        self.inp_defense = QSpinBox(); self.inp_defense.setRange(0, 999999)
+        self.inp_defense.valueChanged.connect(self.on_prop_change)
+        props_form.addRow("Defense:", self.inp_defense)
+        
+        self.inp_attack = QSpinBox(); self.inp_attack.setRange(0, 999999)
+        self.inp_attack.valueChanged.connect(self.on_prop_change)
+        props_form.addRow("Attack:", self.inp_attack)
+
+        self.inp_speed = QSpinBox(); self.inp_speed.setRange(0, 999999)
+        self.inp_speed.valueChanged.connect(self.on_prop_change)
+        props_form.addRow("Speed:", self.inp_speed)
+        
+        self.inp_light_level = QSpinBox(); self.inp_light_level.setRange(0, 255)
+        self.inp_light_level.valueChanged.connect(self.on_prop_change)
+        props_form.addRow("Light Level:", self.inp_light_level)
+
+        self.inp_light_color = QSpinBox(); self.inp_light_color.setRange(0, 255)
+        self.inp_light_color.valueChanged.connect(self.on_prop_change)
+        props_form.addRow("Light Color:", self.inp_light_color)
+
+        self.inp_minimap_color = QSpinBox(); self.inp_minimap_color.setRange(0, 65535)
+        self.inp_minimap_color.valueChanged.connect(self.on_prop_change)
+        props_form.addRow("Minimap Color:", self.inp_minimap_color)
+        
+        # Extended Attributes Button
+        btn_extended = QPushButton("Extended Attributes (13+)")
+        btn_extended.clicked.connect(self.open_extended_attributes)
+        btn_extended.setStyleSheet("background-color: #004d40; border-color: #00695c;") # Teal accent
+        props_form.addRow(btn_extended)
+        
+        data_layout.addWidget(props_widget)
+        
+        # Add Data Group to Upper Layout
+        upper_layout.addWidget(data_grp)
+        
+        # Add Upper Section to Right Layout
+        right_layout.addWidget(upper_widget)
+        
+        # Console Log (Bottom of Right Panel)
+        self.console_log = QPlainTextEdit()
+        self.console_log.setReadOnly(True)
+        self.console_log.setMaximumHeight(150)
+        self.console_log.setPlaceholderText(">> System Log...")
+        
+        right_layout.addWidget(QLabel("Console Output:"))
+        right_layout.addWidget(self.console_log)
+
+        # Tools Buttons
+        tools_layout = QHBoxLayout()
+        btn_scan = QPushButton("Scan All (Log)")
+        btn_scan.clicked.connect(self.scan_otb)
+        btn_debug = QPushButton("Debug Node")
+        btn_debug.clicked.connect(self.debug_current_node)
+        tools_layout.addWidget(btn_scan)
+        tools_layout.addWidget(btn_debug)
+        right_layout.addLayout(tools_layout)
+        
+        splitter.addWidget(right_container)
+        splitter.setSizes([250, 750])
+
+    def log(self, text):
+        self.console_log.appendPlainText(f">> {text}")
 
     # --- Feature Implementations ---
 
@@ -241,214 +714,8 @@ class OtbEditorTab(QWidget):
         pass # Placeholder for "Sync with DAT" logic
     
     def reload_all_attributes(self):
-        pass # Placeholder
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(5, 5, 5, 5)
-        
-        # Toolbar
-        toolbar_layout = QHBoxLayout()
-        self.btn_load = QPushButton("Load items.otb")
-        self.btn_load.setIcon(QIcon.fromTheme("document-open"))
-        self.btn_load.clicked.connect(self.load_otb)
-        self.btn_save = QPushButton("Save items.otb")
-        self.btn_save.setIcon(QIcon.fromTheme("document-save"))
-        self.btn_save.clicked.connect(self.save_otb)
-        
-        btn_style = """
-            QPushButton {
-                background-color: #3b3b3b;
-                color: #e0e0e0;
-                border: 1px solid #555;
-                padding: 6px 12px;
-                border-radius: 3px;
-            }
-            QPushButton:hover { background-color: #4a4a4a; }
-        """
-        self.btn_load.setStyleSheet(btn_style)
-        self.btn_save.setStyleSheet(btn_style)
-        
-        toolbar_layout.addWidget(self.btn_load)
-        toolbar_layout.addWidget(self.btn_save)
-        toolbar_layout.addStretch()
-        main_layout.addLayout(toolbar_layout)
-        
-        # Splitter
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setStyleSheet("QSplitter::handle { background-color: #444; width: 2px; }")
-        main_layout.addWidget(splitter)
-        
-        # --- LEFT PANEL: Item List ---
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Item"])
-        self.tree.setIconSize(QSize(32, 32))
-        self.tree.setIndentation(0)
-        self.tree.setStyleSheet("""
-            QTreeWidget {
-                background-color: #2b2b2b;
-                color: #ccc;
-                border: 1px solid #444;
-                font-size: 13px;
-            }
-            QTreeWidget::item { padding: 4px; }
-            QTreeWidget::item:selected {
-                background-color: #445566;
-                color: white;
-            }
-        """)
-        self.tree.itemClicked.connect(self.on_item_clicked)
-        left_layout.addWidget(self.tree)
-        left_widget.setMinimumWidth(280)
-        
-        splitter.addWidget(left_widget)
-        
-        # --- MIDDLE PANEL: Appearance ---
-        middle_widget = QWidget()
-        middle_layout = QVBoxLayout(middle_widget)
-        middle_layout.setContentsMargins(10, 0, 10, 0)
-        
-        # Appearance Box
-        grp_appearance = QGroupBox("Appearance")
-        app_layout = QVBoxLayout()
-        grp_appearance.setLayout(app_layout)
-        
-        # Preview Labels matching reference "Previous" and "Current"
-        prev_layout = QHBoxLayout()
-        self.lbl_prev_preview = QLabel()
-        self.lbl_prev_preview.setFixedSize(64, 64)
-        self.lbl_prev_preview.setStyleSheet("background-color: #222; border: 1px solid #444;")
-        
-        self.lbl_preview = QLabel()
-        self.lbl_preview.setFixedSize(64, 64)
-        self.lbl_preview.setStyleSheet("background-color: #222; border: 1px solid #444;")
-        self.lbl_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        app_layout.addWidget(QLabel("Previous:"))
-        app_layout.addWidget(self.lbl_prev_preview)
-        app_layout.addWidget(QLabel("Current:"))
-        app_layout.addWidget(self.lbl_preview)
-        
-        middle_layout.addWidget(grp_appearance)
-        
-        # ID Box
-        grp_ids = QGroupBox()
-        ids_layout = QFormLayout()
-        grp_ids.setLayout(ids_layout)
-        
-        self.inp_server_id = QSpinBox()
-        self.inp_server_id.setRange(0, 65535)
-        self.inp_client_id = QSpinBox()
-        self.inp_client_id.setRange(0, 65535)
-        self.inp_client_id.valueChanged.connect(self.update_preview_from_input)
-
-        ids_layout.addRow("Server ID:", self.inp_server_id)
-        ids_layout.addRow("Client ID:", self.inp_client_id)
-        
-        middle_layout.addWidget(grp_ids)
-        middle_layout.addStretch()
-        
-        splitter.addWidget(middle_widget)
-
-        # --- RIGHT PANEL: Attributes & Console ---
-        right_scroll = QScrollArea()
-        right_scroll.setWidgetResizable(True)
-        right_scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
-        
-        right_content = QWidget()
-        right_layout = QVBoxLayout(right_content)
-        right_scroll.setWidget(right_content)
-
-        # Main Grid for Attributes and Props
-        # Reference shows: Checkboxes on left, Props on right
-        
-        top_grid_layout = QHBoxLayout()
-        
-        # 1. Attributes (Flags)
-        grp_flags = QGroupBox("Attributes")
-        grp_flags.setStyleSheet("QGroupBox { font-weight: bold; color: #bbb; }")
-        flags_layout = QVBoxLayout()
-        grp_flags.setLayout(flags_layout)
-        
-        # Use Red color for critical flags to match reference
-        chk_style = """
-            QCheckBox { spacing: 5px; color: #aaa; }
-            QCheckBox:checked { color: #ff5555; font-weight: bold; }
-        """
-        
-        self.flags_mapping = [
-            (QCheckBox("Unpassable"), FLAG_BLOCK_SOLID),
-            (QCheckBox("Movable"), FLAG_MOVEABLE),
-            (QCheckBox("Block Missiles"), FLAG_BLOCK_PROJECTILE),
-            (QCheckBox("Block Pathfinder"), FLAG_BLOCK_PATHFIND),
-            (QCheckBox("Pickupable"), FLAG_PICKUPABLE),
-            (QCheckBox("Stackable"), FLAG_STACKABLE),
-            (QCheckBox("Force Use"), FLAG_FORCE_USE),
-            (QCheckBox("Multi Use"), FLAG_USEABLE), # Correct mapping?
-            (QCheckBox("Rotatable"), FLAG_ROTATABLE),
-            (QCheckBox("Hangable"), FLAG_HANGABLE),
-            (QCheckBox("Hook South"), FLAG_VERTICAL),
-            (QCheckBox("Hook East"), FLAG_HORIZONTAL),
-            
-            # Second col in reference? No, reference has 2 cols mixed? 
-            # Reference image shows single col of checkboxes mostly
-            # But let's add the rest
-            (QCheckBox("Has Elevation"), FLAG_HAS_HEIGHT),
-            (QCheckBox("Ignore Look"), FLAG_IGNORE_LOOK),
-            (QCheckBox("Readable"), FLAG_READABLE),
-            (QCheckBox("Full Ground"), FLAG_FULL_GROUND),
-            (QCheckBox("Info (Client Charges)"), FLAG_CLIENT_CHARGES),
-            (QCheckBox("Dist Read"), FLAG_ALLOW_DISTREAD),
-            (QCheckBox("Decay"), FLAG_CANNOT_DECAY), # Inverted? Check definition. 
-            # FLAG_CANNOT_DECAY = 524288. If name is "Decay", logic might be inverted.
-            # Reference doesn't show "Decay" checkbox explicitly, maybe under other name.
-            # I'll stick to standard names but styled
-        ]
-        
-        for chk, _ in self.flags_mapping:
-            chk.setStyleSheet(chk_style)
-            flags_layout.addWidget(chk)
-            
-        top_grid_layout.addWidget(grp_flags, 1) # Stretch 1
-        
-        # 2. Properties (Right side of attributes)
-        props_container = QWidget()
-        props_layout = QFormLayout(props_container)
-        
-        self.inp_speed = QSpinBox(); self.inp_speed.setRange(0, 9999)
-        self.inp_minimap_color = QSpinBox(); self.inp_minimap_color.setRange(0, 65535)
-        self.inp_light_level = QSpinBox(); self.inp_light_level.setRange(0, 255)
-        self.inp_light_color = QSpinBox(); self.inp_light_color.setRange(0, 255)
-        self.inp_ware_id = QSpinBox(); self.inp_ware_id.setRange(0, 65535)
-        self.inp_stack_order = QComboBox(); self.inp_stack_order.addItems(["None", "Border", "Bottom", "Top"]) 
-        self.inp_name = QLineEdit()
-        self.inp_type = QComboBox() 
-        self.inp_type.addItems(["None", "Ground", "Container", "Weapon", "Ammunition", "Armor", "Charges", "Teleport", "MagicField", "Writeable", "Key", "Splash", "Fluid", "Door", "Deprecated", "Depot"])
-        
-        props_layout.addRow("Ground Speed:", self.inp_speed)
-        props_layout.addRow("Minimap Color:", self.inp_minimap_color)
-        props_layout.addRow("Light Level:", self.inp_light_level)
-        props_layout.addRow("Light Color:", self.inp_light_color)
-        props_layout.addRow("Ware ID:", self.inp_ware_id)
-        props_layout.addRow("Stack Order:", self.inp_stack_order)
-        props_layout.addRow("Name:", self.inp_name)
-        props_layout.addRow("Type:", self.inp_type)
-        
-        # Extra props not in reference main view but needed
-        self.inp_weight = QSpinBox(); self.inp_weight.setRange(0, 999999); self.inp_weight.setSuffix(" oz")
-        props_layout.addRow("Weight:", self.inp_weight)
-        self.inp_armor = QSpinBox(); self.inp_armor.setRange(0, 9999)
-        props_layout.addRow("Armor:", self.inp_armor)
-        self.inp_attack = QSpinBox(); self.inp_attack.setRange(0, 9999)
-        props_layout.addRow("Attack:", self.inp_attack)
-        
-        top_grid_layout.addWidget(props_container, 2) # Stretch 2
-        
-        right_layout.addLayout(top_grid_layout)
-        
-        # Console Log at Bottom
+        # Placeholder for future implementation
+        pass
         self.console_log = QPlainTextEdit()
         self.console_log.setReadOnly(True)
         self.console_log.setStyleSheet("background-color: #222; color: #aaa; font-family: Consolas; font-size: 11px; border: 1px solid #444;")
@@ -489,19 +756,35 @@ class OtbEditorTab(QWidget):
         if not path: return
         
         self.log(f"Loading {path}...")
+        
+        # 1. Parse Phase (Indeterminate)
+        progress = DarkLoadingDialog("Load OTB", "Parsing OTB structure...", self)
+        progress.setRange(0, 0) # Indeterminate
+        progress.show()
+        QApplication.processEvents()
+        
         try:
             self.otb_root = OTBHandler.load(path)
+            
             if self.otb_root:
-                self.populate_tree()
+                # 2. Populate Phase (Determinant)
+                self.populate_tree(progress)
                 self.log("OTB Loaded successfully.")
             else:
-                 self.log("Failed to parse OTB.")
+                progress.close()
+                self.log("Failed to parse OTB.")
         except Exception as e:
+            progress.close()
             self.log(f"Error: {e}")
 
-    def populate_tree(self):
+    def populate_tree(self, progress_dialog=None):
         self.tree.clear()
         if not self.otb_root: return
+        
+        if progress_dialog:
+            progress_dialog.setLabelText("Collecting item nodes...")
+            progress_dialog.setRange(0, 0)
+            QApplication.processEvents()
         
         self.item_nodes = []
         
@@ -513,17 +796,38 @@ class OtbEditorTab(QWidget):
                 
         traverse(self.otb_root)
         
+        total_items = len(self.item_nodes)
+        
+        if progress_dialog:
+            progress_dialog.setRange(0, total_items)
+            progress_dialog.setValue(0)
+            progress_dialog.setLabelText(f"Populating Item List (0/{total_items})...")
+            QApplication.processEvents()
+        
         root = self.tree.invisibleRootItem()
         unnamed_count = 0
         
-        for node in self.item_nodes:
+        # Batch updates for performance
+        updates_per_frame = 100 
+        
+        for i, node in enumerate(self.item_nodes):
             # FILTER: Skip items with Client ID 0 (empty sprites) as requested
             cid = node.attribs.get('clientId', 0)
-            if cid == 0: continue
+            if cid != 0:
+                self.add_tree_item(node, root)
+                if 'name' not in node.attribs or not node.attribs['name']:
+                    unnamed_count += 1
             
-            self.add_tree_item(node, root)
-            if 'name' not in node.attribs or not node.attribs['name']:
-                unnamed_count += 1
+            if progress_dialog and i % updates_per_frame == 0:
+                progress_dialog.setValue(i)
+                progress_dialog.setLabelText(f"Populating Item List ({i}/{total_items})...")
+                QApplication.processEvents()
+                if progress_dialog.wasCanceled():
+                    break
+                    
+        if progress_dialog:
+            progress_dialog.setValue(total_items)
+            progress_dialog.close()
                 
         self.log(f"Loaded {len(self.item_nodes)} items.")
         if unnamed_count > 0:
@@ -585,7 +889,7 @@ class OtbEditorTab(QWidget):
             self.inp_light_level.setValue(node.attribs.get('lightLevel', 0))
             self.inp_light_color.setValue(node.attribs.get('lightColor', 0))
             self.inp_minimap_color.setValue(node.attribs.get('minimapColor', 0))
-            self.inp_ware_id.setValue(node.attribs.get('wareId', 0))
+            self.inp_wareid.setValue(node.attribs.get('wareId', 0))
             
             # Update Preview
             self.update_preview_from_input()
@@ -609,6 +913,97 @@ class OtbEditorTab(QWidget):
         OTBHandler.save(self.otb_root, path)
         self.log("Saved OTB file.")
             
+    def filter_tree(self, text):
+        search_term = text.lower()
+        root = self.tree.invisibleRootItem()
+        child_count = root.childCount()
+        
+        for i in range(child_count):
+            item = root.child(i)
+            if not search_term:
+                item.setHidden(False)
+            else:
+                item.setHidden(search_term not in item.text(0).lower())
+
+    def open_extended_attributes(self):
+        if not self.current_node: return
+        dlg = ExtendedAttributesDialog(self.current_node.attribs, self)
+        dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dlg.show()
+        
+    def on_prop_change(self):
+        # Update current node attributes from UI
+        if not self.current_node: return
+        # Safety check: ensure all widgets are initialized before accessing them
+        if not hasattr(self, 'inp_type'): return
+        
+        # Appearance
+        self.current_node.attribs['serverId'] = self.inp_server_id.value()
+        
+        # Props
+        name = self.inp_name.text()
+        if name: self.current_node.attribs['name'] = name
+        elif 'name' in self.current_node.attribs: del self.current_node.attribs['name']
+        
+        self.current_node.attribs['weight'] = self.inp_weight.value()
+        self.current_node.attribs['speed'] = self.inp_speed.value()
+        self.current_node.attribs['armor'] = self.inp_armor.value()
+        self.current_node.attribs['attack'] = self.inp_attack.value()
+        self.current_node.attribs['lightLevel'] = self.inp_light_level.value()
+        self.current_node.attribs['lightColor'] = self.inp_light_color.value()
+        self.current_node.attribs['minimapColor'] = self.inp_minimap_color.value()
+        self.current_node.attribs['wareId'] = self.inp_wareid.value()
+        
+        # Update tree text if Server ID changed
+        current_item = self.tree.currentItem()
+        if current_item:
+            sid = self.current_node.attribs.get('serverId', 0)
+            cid = self.current_node.attribs.get('clientId', 0)
+            name_txt = self.current_node.attribs.get('name', '')
+            display_text = f"{sid} - {name_txt}" if name_txt else f"{sid} - Item {cid}"
+            if sid == 0: display_text = f"{cid} (Client ID) - {name_txt}" if name_txt else f"{cid} (Client ID)"
+            current_item.setText(0, display_text)
+
+    def on_client_id_change(self):
+        if not self.current_node: return
+        self.current_node.attribs['clientId'] = self.inp_client_id.value()
+        self.update_preview_from_input()
+        self.on_prop_change() # Update tree text
+
+    def on_flag_change(self):
+        if not self.current_node: return
+        
+        flags = 0
+        for chk, val in self.flags_mapping:
+            if chk.isChecked():
+                flags |= val
+        
+        self.current_node.attribs['flags'] = flags
+
+    def update_node(self):
+        self.on_prop_change()
+        self.on_flag_change()
+        self.on_client_id_change()
+        self.log("Node updated in memory (Save to persist).")
+
+    def scan_otb(self):
+        if not self.otb_root: return
+        self.log("Scanning OTB structure...")
+        
+        node_count = 0
+        max_sid = 0
+        
+        def traverse(node):
+            nonlocal node_count, max_sid
+            node_count += 1
+            if 'serverId' in node.attribs:
+                if node.attribs['serverId'] > max_sid: max_sid = node.attribs['serverId']
+            for child in node.children:
+                traverse(child)
+                
+        traverse(self.otb_root)
+        self.log(f"Scan complete. Total Nodes: {node_count}. Max Server ID: {max_sid}")
+
     def debug_current_node(self):
         if not self.current_node: 
             self.log("No node selected to debug.")
