@@ -1889,6 +1889,27 @@ class DatSprTab(QWidget):
         lbl_sprites = QLabel("Sprites")
         lbl_sprites.setStyleSheet("color: #5b9bd5; font-size: 12px; font-weight: bold; text-transform: uppercase;")
         sph_layout.addWidget(lbl_sprites)
+        
+        # Go To Sprite ID Input
+        sprite_goto_frame = QFrame()
+        sprite_goto_layout = QHBoxLayout(sprite_goto_frame)
+        sprite_goto_layout.setContentsMargins(0, 5, 0, 0)
+        sprite_goto_layout.setSpacing(5)
+        
+        self.sprite_goto_entry = QLineEdit()
+        self.sprite_goto_entry.setPlaceholderText("Sprite ID...")
+        self.sprite_goto_entry.setStyleSheet("background-color: #3e3e50; border: 1px solid #5b9bd5; border-radius: 4px; color: white; padding: 4px;")
+        self.sprite_goto_entry.returnPressed.connect(self.goto_sprite_id)
+        sprite_goto_layout.addWidget(self.sprite_goto_entry)
+        
+        sprite_go_btn = QPushButton("GO")
+        sprite_go_btn.setFixedSize(50, 28)
+        sprite_go_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        sprite_go_btn.setStyleSheet("background-color: #4a90e2; color: white; border-radius: 4px; font-weight: bold;")
+        sprite_go_btn.clicked.connect(self.goto_sprite_id)
+        sprite_goto_layout.addWidget(sprite_go_btn)
+        
+        sph_layout.addWidget(sprite_goto_frame)
         sprites_layout.addWidget(sprite_header)
 
         self.sprite_list_frame = ScrollableFrame(self, "", layout_cls=QVBoxLayout)
@@ -2609,6 +2630,10 @@ class DatSprTab(QWidget):
 
         self.editor.things[cat_key][target_id]["texture_bytes"] = new_texture_bytes
 
+        # Navigate to last sprite page to show the newly imported sprite
+        self.sprite_page = (self.spr.sprite_count - 1) // self.sprites_per_page
+        self.refresh_sprite_list()
+
         self.on_preview_click()
         QMessageBox.information(self, "Sucesso", "Importado com sucesso!")
 
@@ -2858,6 +2883,27 @@ class DatSprTab(QWidget):
             self.current_page -= 1
         self.refresh_id_list()
 
+    def last_id_page(self):
+        if not self.editor:
+            return
+        cat_key = self.get_current_category_key()
+        total_count = self.editor.counts[cat_key]
+        start_offset = 100 if cat_key == "items" else 1
+        max_page = max(0, (total_count - start_offset) // self.ids_per_page)
+        self.current_page = max_page
+        self.refresh_id_list()
+
+    def skip_id_page(self):
+        """Skip 10 pages forward in item list"""
+        if not self.editor:
+            return
+        cat_key = self.get_current_category_key()
+        total_count = self.editor.counts[cat_key]
+        start_offset = 100 if cat_key == "items" else 1
+        max_page = max(0, (total_count - start_offset) // self.ids_per_page)
+        self.current_page = min(self.current_page + 10, max_page)
+        self.refresh_id_list()
+
     def filter_id_list(self, text):
         self.current_page = 0
         self.refresh_id_list()
@@ -2873,7 +2919,7 @@ class DatSprTab(QWidget):
         if not self.editor:
             return
 
-        self.show_loading("Loading...\nPlease wait.")
+        self.show_loading("Loading Items...", progress_mode=True)
 
         cat_map = {
             "Item": "items",
@@ -2939,7 +2985,14 @@ class DatSprTab(QWidget):
             
             loop_iterable = range(current_start_id, end_id)
 
-        for item_id in loop_iterable:
+        total_items = len(list(loop_iterable)) if hasattr(loop_iterable, '__iter__') else end_id - current_start_id
+        loop_iterable = list(loop_iterable) if not isinstance(loop_iterable, list) else loop_iterable
+        
+        for idx, item_id in enumerate(loop_iterable):
+            # Update progress every 50 items for faster loading
+            if idx % 50 == 0:
+                self.update_progress(idx, total_items)
+            
             item_frame = QFrame()
             item_frame.setObjectName("itemCard")
             item_frame.setFixedSize(130, 60)
@@ -3020,6 +3073,19 @@ class DatSprTab(QWidget):
             next_btn.clicked.connect(self.next_page)
             nav_layout.addWidget(next_btn)
 
+        # Skip button to jump 10 pages
+        skip_btn = QPushButton("⏩")
+        skip_btn.setMaximumWidth(60)
+        skip_btn.setToolTip("Skip 10 pages")
+        skip_btn.clicked.connect(self.skip_id_page)
+        nav_layout.addWidget(skip_btn)
+
+        # Last button to go to last page
+        last_btn = QPushButton("⏭")
+        last_btn.setMaximumWidth(60)
+        last_btn.clicked.connect(self.last_id_page)
+        nav_layout.addWidget(last_btn)
+
         # Posiciona a navegação abaixo de tudo
         self.ids_list_frame.scroll_layout.addWidget(nav_frame)
         # FlowLayout doesn't have setRowStretch, we rely on the layout itself.
@@ -3039,13 +3105,19 @@ class DatSprTab(QWidget):
         if not self.spr:
             return
 
-        self.show_loading("Loading...\nPlease wait.")
+        self.show_loading("Loading Sprites...", progress_mode=True)
 
         total = self.spr.sprite_count
         start = self.sprite_page * self.sprites_per_page + 1
         end = min(start + self.sprites_per_page, total + 1)
-
-        for spr_id in range(start, end):
+        
+        total_sprites_to_load = end - start
+        
+        for idx, spr_id in enumerate(range(start, end)):
+            # Update progress every 50 sprites for faster loading
+            if idx % 50 == 0:
+                self.update_progress(idx, total_sprites_to_load)
+            
             item_frame = QFrame()
             item_frame.setFrameShape(QFrame.Shape.NoFrame)
             item_layout = QHBoxLayout(item_frame)
@@ -3121,6 +3193,19 @@ class DatSprTab(QWidget):
             next_btn.clicked.connect(self.next_sprite_page)
             nav_layout.addWidget(next_btn)
 
+        # Skip button to jump 10 pages
+        skip_btn = QPushButton("⏩")
+        skip_btn.setMaximumWidth(60)
+        skip_btn.setToolTip("Skip 10 pages")
+        skip_btn.clicked.connect(self.skip_sprite_page)
+        nav_layout.addWidget(skip_btn)
+
+        # Last button to go to last sprite page
+        last_btn = QPushButton("⏭")
+        last_btn.setMaximumWidth(60)
+        last_btn.clicked.connect(self.last_sprite_page)
+        nav_layout.addWidget(last_btn)
+
         self.sprite_list_frame.scroll_layout.addWidget(nav)
         self.sprite_list_frame.scroll_layout.addStretch()
         self.hide_loading()
@@ -3160,6 +3245,45 @@ class DatSprTab(QWidget):
         if self.sprite_page > 0:
             self.sprite_page -= 1
             self.refresh_sprite_list()
+
+    def last_sprite_page(self):
+        if not self.spr:
+            return
+        max_page = max(0, (self.spr.sprite_count - 1) // self.sprites_per_page)
+        self.sprite_page = max_page
+        self.refresh_sprite_list()
+
+    def skip_sprite_page(self):
+        """Skip 10 pages forward in sprite list"""
+        if not self.spr:
+            return
+        max_page = max(0, (self.spr.sprite_count - 1) // self.sprites_per_page)
+        self.sprite_page = min(self.sprite_page + 10, max_page)
+        self.refresh_sprite_list()
+
+    def goto_sprite_id(self):
+        """Navigate directly to a specific sprite ID"""
+        if not self.spr:
+            return
+        try:
+            sprite_id = int(self.sprite_goto_entry.text().strip())
+            if sprite_id < 1 or sprite_id > self.spr.sprite_count:
+                self.status_label.setText(f"Sprite ID {sprite_id} out of range (1-{self.spr.sprite_count})")
+                self.status_label.setStyleSheet("color: orange;")
+                return
+            
+            # Navigate to the page containing this sprite
+            self.sprite_page = (sprite_id - 1) // self.sprites_per_page
+            self.refresh_sprite_list()
+            
+            # Select the sprite
+            self.select_sprite(sprite_id, from_preview_click=False)
+            
+            self.status_label.setText(f"Navigated to sprite {sprite_id}")
+            self.status_label.setStyleSheet("color: #90ee90;")
+        except ValueError:
+            self.status_label.setText("Invalid sprite ID")
+            self.status_label.setStyleSheet("color: orange;")
 
     def change_preview_index(self, delta):
         if not self.current_preview_sprite_list:
@@ -4236,13 +4360,12 @@ class DatSprTab(QWidget):
             if total > 0:
                 percentage = int((value / total) * 100)
             
-            self.loading_progress.setRange(0, 100)
             self.loading_progress.setValue(percentage)
             
             if message:
                 self.loading_label.setText(message)
             
-            self.loading_progress.setFormat(f"{value}/{total} ({percentage}%)")
+            self.loading_progress.setFormat(f"{percentage}%")
 
             from PyQt6.QtWidgets import QApplication
             QApplication.processEvents()
@@ -4279,15 +4402,15 @@ class DatSprTab(QWidget):
 
     def open_shader(self):
         try:
-            self.shader_window = ShaderEditor(self)
+            self.shader_window = ShaderEditor()
             self.shader_window.show()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open Shader Editor: {e}")
 
     def open_particle(self):
         try:
-            self.particle_window = ParticleGenerator(self)
-            self.particle_window.show()
+            self.particle_window = ParticleGenerator()
+            self.particle_window.run()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open Particle Editor: {e}")
 
@@ -4300,7 +4423,10 @@ class DatSprTab(QWidget):
 
     def open_sprite_optimizer(self):
         try:
-             self.optimizer_window = SpriteOptimizerWindow(self)
+             if not self.spr or not self.editor:
+                 QMessageBox.warning(self, "Warning", "Please load DAT and SPR files first.")
+                 return
+             self.optimizer_window = SpriteOptimizerWindow(self.spr, self.editor, self)
              self.optimizer_window.show()
         except Exception as e:
              QMessageBox.critical(self, "Error", f"Failed to open Sprite Optimizer: {e}")

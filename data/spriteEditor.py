@@ -486,10 +486,138 @@ class SliceWindow(QMainWindow):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Sprite Editor - Made by Mateuskl")
+        self.setWindowTitle("Sprite Editor - Made by Sherrat")
         self.resize(1300, 700)
 
         self.setWindowIcon(QIcon("editor.ico"))
+        
+        # Apply Dark Blue Theme
+        self.setStyleSheet("""
+            QMainWindow, QWidget {
+                background-color: #1a1a2e;
+                color: #e0e0e0;
+                font-family: "Segoe UI", sans-serif;
+            }
+            QGroupBox {
+                border: 1px solid rgba(74, 144, 226, 0.3);
+                border-radius: 8px;
+                margin-top: 16px;
+                background-color: rgba(22, 33, 62, 0.8);
+                font-weight: bold;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 2px 10px;
+                background-color: #4a90e2;
+                color: white;
+                border-radius: 4px;
+            }
+            QLineEdit, QSpinBox, QComboBox, QDoubleSpinBox {
+                background-color: #16213e;
+                border: 1px solid rgba(74, 144, 226, 0.3);
+                border-radius: 4px;
+                padding: 4px 8px;
+                color: #fff;
+            }
+            QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
+                border: 1px solid #4a90e2;
+            }
+            QPushButton {
+                background-color: #16213e;
+                border: 1px solid rgba(74, 144, 226, 0.3);
+                border-radius: 6px;
+                padding: 6px 12px;
+                color: #e0e0e0;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: rgba(74, 144, 226, 0.3);
+                border-color: #4a90e2;
+            }
+            QPushButton:pressed {
+                background-color: #4a90e2;
+            }
+            QTabWidget::pane {
+                border: 1px solid rgba(74, 144, 226, 0.3);
+                background: #16213e;
+                border-radius: 6px;
+            }
+            QTabBar::tab {
+                background: #16213e;
+                color: #aaa;
+                padding: 6px 12px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background: #4a90e2;
+                color: white;
+            }
+            QTabBar::tab:hover:!selected {
+                background: rgba(74, 144, 226, 0.3);
+            }
+            QSlider::groove:horizontal {
+                border: 1px solid #4a90e2;
+                height: 6px;
+                background: #16213e;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #4a90e2;
+                border: none;
+                width: 14px;
+                margin: -4px 0;
+                border-radius: 7px;
+            }
+            QCheckBox {
+                spacing: 6px;
+                color: #ccc;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border: 1px solid #4a90e2;
+                border-radius: 3px;
+                background: #16213e;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #4a90e2;
+            }
+            QScrollBar:vertical {
+                background: #1a1a2e;
+                width: 10px;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(74, 144, 226, 0.5);
+                border-radius: 5px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #4a90e2;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QLabel {
+                color: #e0e0e0;
+            }
+            QToolBar {
+                background-color: #16213e;
+                border-bottom: 1px solid rgba(74, 144, 226, 0.3);
+                spacing: 5px;
+            }
+            QDockWidget {
+                titlebar-close-icon: none;
+                titlebar-normal-icon: none;
+            }
+            QDockWidget::title {
+                background-color: #16213e;
+                padding: 6px;
+                border-bottom: 1px solid rgba(74, 144, 226, 0.3);
+            }
+        """)
 
 
         self.original_image_pil = None
@@ -1285,10 +1413,19 @@ class SliceWindow(QMainWindow):
 
         tab_upscale_layout.addStretch()
 
-        self.tab_widget.addTab(tab_resize, "Adjust")
-        self.tab_widget.addTab(tab_transparency, "Color")
-        self.tab_widget.addTab(tab_slice, "Tools")
-        self.tab_widget.addTab(tab_upscale, "Upscale")
+        # Wrap each tab content in a scroll area
+        def wrap_in_scroll(widget):
+            scroll = QScrollArea()
+            scroll.setWidget(widget)
+            scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+            return scroll
+
+        self.tab_widget.addTab(wrap_in_scroll(tab_resize), "Adjust")
+        self.tab_widget.addTab(wrap_in_scroll(tab_transparency), "Color")
+        self.tab_widget.addTab(wrap_in_scroll(tab_slice), "Tools")
+        self.tab_widget.addTab(wrap_in_scroll(tab_upscale), "Upscale")
 
         lp_layout.addWidget(self.tab_widget)
 

@@ -345,55 +345,67 @@ class OtbEditorTab(QWidget):
     def apply_styles(self):
         self.setStyleSheet("""
             QWidget {
-                background-color: #121212;
+                background-color: #1a1a2e;
                 color: #e0e0e0;
                 font-family: "Segoe UI", sans-serif;
                 font-size: 13px;
             }
             
             QToolTip {
-                background-color: #2a2a2a;
+                background-color: #2a2a3e;
                 color: #ffffff;
-                border: 1px solid #ffffff;
+                border: 1px solid #4a90e2;
                 padding: 4px;
+                border-radius: 4px;
             }
             
             /* GroupBox */
             QGroupBox {
-                border: 1px solid #333;
-                border-radius: 6px;
+                border: 1px solid rgba(74, 144, 226, 0.3);
+                border-radius: 8px;
                 margin-top: 24px;
-                background-color: #1a1a1a;
+                background-color: rgba(30, 30, 46, 0.8);
                 font-weight: bold;
                 padding-top: 10px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                padding: 4px 10px;
-                background-color: #0d47a1; /* Deep Blue Accent */
+                padding: 4px 12px;
+                background-color: #4a90e2;
                 color: white;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                border: 1px solid #0d47a1;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                border: 1px solid #4a90e2;
             }
             
             /* Inputs */
             QLineEdit, QSpinBox, QComboBox {
-                background-color: #252525;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 4px 8px;
+                background-color: #16213e;
+                border: 1px solid rgba(74, 144, 226, 0.3);
+                border-radius: 6px;
+                padding: 6px 10px;
                 color: #fff;
-                selection-background-color: #0d47a1;
+                selection-background-color: #4a90e2;
             }
             QLineEdit:hover, QSpinBox:hover, QComboBox:hover {
-                border-color: #555;
-                background-color: #2d2d2d;
+                border-color: #4a90e2;
+                background-color: #1e2a4a;
             }
             QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
-                border: 1px solid #448aff;
-                background-color: #202020;
+                border: 2px solid #4a90e2;
+                background-color: #16213e;
+            }
+            
+            QComboBox::drop-down {
+                border: none;
+                padding-right: 8px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 6px solid #4a90e2;
             }
             
             /* Checkbox */
@@ -402,63 +414,63 @@ class OtbEditorTab(QWidget):
                 color: #ccc;
             }
             QCheckBox::indicator {
-                width: 16px;
-                height: 16px;
-                border: 1px solid #555;
-                border-radius: 3px;
-                background: #252525;
+                width: 18px;
+                height: 18px;
+                border: 1px solid #4a90e2;
+                border-radius: 4px;
+                background: #16213e;
             }
             QCheckBox::indicator:unchecked:hover {
-                border-color: #777;
+                border-color: #5ba0f2;
+                background: #1e2a4a;
             }
             QCheckBox::indicator:checked {
-                background-color: #0d47a1;
-                border-color: #0d47a1;
-                image: url(data:image/svg+xml;base64,...); /* Optional check icon */
+                background-color: #4a90e2;
+                border-color: #4a90e2;
             }
             
             /* Tree Widget */
             QTreeWidget {
-                background-color: #1a1a1a;
-                border: 1px solid #333;
-                border-radius: 6px;
-                alternate-background-color: #202020;
+                background-color: #16213e;
+                border: 1px solid rgba(74, 144, 226, 0.3);
+                border-radius: 8px;
+                alternate-background-color: #1a2540;
                 padding: 5px;
             }
             QTreeWidget::item {
-                padding: 4px;
-                border-radius: 3px;
+                padding: 5px;
+                border-radius: 4px;
             }
             QTreeWidget::item:hover {
-                background-color: #2a2a2a;
+                background-color: rgba(74, 144, 226, 0.2);
             }
             QTreeWidget::item:selected {
-                background-color: #0d47a1;
+                background-color: #4a90e2;
                 color: white;
             }
             
             /* Splitter */
             QSplitter::handle {
-                background-color: #333;
+                background-color: rgba(74, 144, 226, 0.3);
             }
             QSplitter::handle:hover {
-                background-color: #448aff;
+                background-color: #4a90e2;
             }
             
             /* Scrollbars */
             QScrollBar:vertical {
                 border: none;
-                background: #121212;
+                background: #1a1a2e;
                 width: 10px;
                 margin: 0;
             }
             QScrollBar::handle:vertical {
-                background: #444;
+                background: rgba(74, 144, 226, 0.5);
                 min-height: 20px;
                 border-radius: 5px;
             }
             QScrollBar::handle:vertical:hover {
-                background: #666;
+                background: #4a90e2;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0px;
@@ -466,20 +478,46 @@ class OtbEditorTab(QWidget):
             
             /* Buttons */
             QPushButton {
-                background-color: #252525;
-                border: 1px solid #333;
+                background-color: #16213e;
+                border: 1px solid rgba(74, 144, 226, 0.3);
                 color: #e0e0e0;
-                padding: 6px 15px;
-                border-radius: 4px;
+                padding: 8px 18px;
+                border-radius: 6px;
                 font-weight: 600;
             }
             QPushButton:hover {
-                background-color: #333;
-                border-color: #555;
+                background-color: rgba(74, 144, 226, 0.3);
+                border-color: #4a90e2;
             }
             QPushButton:pressed {
-                background-color: #0d47a1;
-                border-color: #0d47a1;
+                background-color: #4a90e2;
+                border-color: #4a90e2;
+            }
+            
+            /* Menu Bar */
+            QMenuBar {
+                background-color: #16213e;
+                color: #e0e0e0;
+                border-bottom: 1px solid rgba(74, 144, 226, 0.3);
+            }
+            QMenuBar::item:selected {
+                background-color: #4a90e2;
+            }
+            QMenu {
+                background-color: #1a1a2e;
+                border: 1px solid rgba(74, 144, 226, 0.3);
+            }
+            QMenu::item:selected {
+                background-color: #4a90e2;
+            }
+            
+            /* PlainTextEdit (Console) */
+            QPlainTextEdit {
+                background-color: #0d1117;
+                color: #00ff00;
+                font-family: Consolas, monospace;
+                border: 1px solid rgba(74, 144, 226, 0.3);
+                border-radius: 6px;
             }
         """)
 
