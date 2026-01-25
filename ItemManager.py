@@ -22,6 +22,7 @@ if assets_path not in sys.path:
 from datspr import DatSprTab
 from otb_editor import OtbEditorTab
 from tools_tab import ToolsTab
+from assets_editor import AssetsEditorTab
 
 class App(QMainWindow):
     def __init__(self):
@@ -60,6 +61,10 @@ class App(QMainWindow):
         # Tools Tab
         self.tools_module = ToolsTab(self.datspr_module)
         self.tab_view.addTab(self.tools_module, "Tools")
+
+        # Assets Editor Tab (Tibia 12+)
+        self.assets_editor_module = AssetsEditorTab()
+        self.tab_view.addTab(self.assets_editor_module, "Assets Editor (12+)")
 
 def set_dark_theme(app):
     app.setStyle("Fusion")
